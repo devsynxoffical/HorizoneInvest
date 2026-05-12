@@ -1,0 +1,43 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  font-family: 'Plus Jakarta Sans', Segoe UI, Arial, sans-serif;
+  --bg: #0b1323;
+  --text: #e5eef7;
+  --muted: #9fb2cb;
+  --panel: #111b2f;
+  --panel-2: #0d1729;
+  --border: #23324f;
+  --border-soft: #1f2d47;
+  --input-bg: #0f1728;
+  --input-border: #2a3a5a;
+  --input-text: #dbe7f5;
+  --nav-text: #bfd0e8;
+  --sidebar-sub: #90a4c0;
+}
+
+body[data-admin-theme='light'] {
+  --bg: #f3f7ff;
+  --text: #15243d;
+  --muted: #4f6786;
+  --panel: #ffffff;
+  --panel-2: #eef4ff;
+  --border: #d3e0f5;
+  --border-soft: #e2ebf9;
+  --input-bg: #ffffff;
+  --input-border: #c7d9f3;
+  --input-text: #13243e;
+  --nav-text: #24466f;
+  --sidebar-sub: #4e6a8d;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--bg);
+  color: var(--text);
+}

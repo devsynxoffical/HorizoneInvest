@@ -1,0 +1,292 @@
+const express = require("express");
+const { z } = require("zod");
+
+const db = require("../../db/knex");
+const { requireAuth } = require("../../middleware/auth");
+const validate = require("../../middleware/validate");
+const asyncHandler = require("../../utils/asyncHandler");
+const ApiError = require("../../utils/ApiError");
+const { adjustWalletBalance, getOrCreateWallet } = require("../../services/walletService");
+const { applyCommissions } = require("../../services/referralService");
+const { creditPendingDailyProfits } = require("../../services/investmentProfitService");
+
+const router = express.Router();
+
+const investSchema = z.object({
+  planId: z.number().int().positive(),
+  amount: z.number().positive(),
+});
+
+function getMaturityDate(startDate, durationDays) {
+  const base = new Date(startDate);
+  base.setDate(base.getDate() + Number(durationDays || 0));
+  return base;
+}
+
+function getCompletedDays(startDate, durationDays) {
+  const safeDuration = Math.max(1, Number(durationDays || 1));
+  const elapsedMs = Math.max(0, Date.now() - new Date(startDate).getTime());
+  const elapsedDays = Math.floor(elapsedMs / (1000 * 60 * 60 * 24));
+  return Math.min(safeDuration, Math.max(0, elapsedDays));
+}
+
+router.get(
+  "/plans",
+  asyncHandler(async (_req, res) => {
+    const plans = await db("investment_plans")
+      .select(
+        "id",
+        "slug",
+        "name",
+        "min_amount as minAmount",
+        "max_amount as maxAmount",
+        "duration_days as durationDays",
+        "daily_return_percent as dailyReturn",
+        "total_return_percent as totalReturn",
+        "features",
+        "image_path as imagePath",
+      )
+      .where({ is_active: 1 });
+
+    res.json({
+      success: true,
+      data: plans.map((p) => ({ ...p, features: p.features ? JSON.parse(p.features) : [] })),
+    });
+  }),
+);
+
+router.get(
+  "/mine",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await creditPendingDailyProfits(db, req.user.id);
+
+    const rows = await db("investments")
+      .join("investment_plans", "investments.plan_id", "investment_plans.id")
+      .select(
+        "investments.id",
+        "investments.amount",
+        "investments.status",
+        "investments.start_date as startDate",
+        "investments.end_date as endDate",
+        "investments.expected_return as expectedReturn",
+        "investments.claimed_earning as claimedEarning",
+        "investment_plans.duration_days as durationDays",
+        "investment_plans.name as planName",
+      )
+      .where("investments.user_id", req.user.id)
+      .orderBy("investments.created_at", "desc");
+
+    const profitRows = await db("investment_daily_profits")
+      .where("user_id", req.user.id)
+      .select("investment_id as investmentId")
+      .sum({ total: "amount" })
+      .groupBy("investment_id");
+    const creditedByInvestment = new Map(profitRows.map((item) => [Number(item.investmentId), Number(item.total || 0)]));
+
+    const now = new Date();
+    res.json({
+      success: true,
+      data: rows.map((item) => {
+        const expectedReturn = Number(item.expectedReturn || 0);
+        const amount = Number(item.amount || 0);
+        const profit = Math.max(0, expectedReturn - amount);
+        const claimedEarning = Number(creditedByInvestment.get(Number(item.id)) || item.claimedEarning || 0);
+        const accruedEarning = claimedEarning;
+        const availableEarning = Math.max(0, Number((profit - claimedEarning).toFixed(4)));
+        const completedDays = getCompletedDays(item.startDate, item.durationDays);
+        const progressPercent = Number(((completedDays / Math.max(1, Number(item.durationDays || 1))) * 100).toFixed(2));
+        const maturityDate = getMaturityDate(item.startDate, item.durationDays);
+        const isMatured = now >= maturityDate;
+        return {
+          ...item,
+          amount,
+          expectedReturn,
+          profit,
+          claimedEarning,
+          accruedEarning,
+          availableEarning,
+          completedDays,
+          progressPercent,
+          maturityDate: maturityDate.toISOString().slice(0, 10),
+          canClaim: item.status === "active" && isMatured,
+          canWithdrawEarning: item.status === "active" && availableEarning > 0,
+        };
+      }),
+    });
+  }),
+);
+
+router.post(
+  "/invest",
+  requireAuth,
+  validate(investSchema),
+  asyncHandler(async (req, res) => {
+    const plan = await db("investment_plans").where({ id: req.body.planId, is_active: 1 }).first();
+    if (!plan) throw new ApiError(404, "Plan not found");
+    if (Number(req.body.amount) < Number(plan.min_amount)) throw new ApiError(400, "Amount below minimum");
+    if (plan.max_amount && Number(req.body.amount) > Number(plan.max_amount)) throw new ApiError(400, "Amount above maximum");
+
+    await db.transaction(async (trx) => {
+      const amount = Number(req.body.amount);
+      const expectedReturn = amount + amount * (Number(plan.total_return_percent) / 100);
+      const reference = `INV-${Date.now()}`;
+
+      // Deposits stay locked until used in an investment.
+      const wallet = await getOrCreateWallet(db, req.user.id, trx);
+      const current = await trx("wallets").where({ id: wallet.id }).forUpdate().first();
+      const lockedBalance = Number(current.locked_balance || 0);
+      const consumeLocked = Math.min(lockedBalance, amount);
+      if (consumeLocked > 0) {
+        await trx("wallets")
+          .where({ id: wallet.id })
+          .update({
+            locked_balance: Number((lockedBalance - consumeLocked).toFixed(2)),
+            updated_at: trx.fn.now(),
+          });
+      }
+
+      await adjustWalletBalance(db, { userId: req.user.id, delta: -amount, reason: "investment", reference }, trx);
+      await trx("investments").insert({
+        user_id: req.user.id,
+        plan_id: plan.id,
+        amount,
+        status: "active",
+        start_date: trx.fn.now(),
+        expected_return: expectedReturn,
+        claimed_earning: 0,
+      });
+      await trx("transactions").insert({
+        user_id: req.user.id,
+        type: "investment",
+        amount,
+        status: "active",
+        method: plan.name,
+        reference,
+      });
+      await trx("notifications").insert({
+        user_id: req.user.id,
+        title: "Investment activated",
+        message: `${plan.name} investment of $${amount.toFixed(2)} is now active.`,
+      });
+
+      const commissions = await applyCommissions(db, {
+        sourceUserId: req.user.id,
+        sourceAmount: amount,
+        reference,
+      }, trx);
+
+      for (const commission of commissions) {
+        await adjustWalletBalance(db, {
+          userId: commission.referrerId,
+          delta: commission.amount,
+          reason: "commission",
+          reference,
+        }, trx);
+        await trx("transactions").insert({
+          user_id: commission.referrerId,
+          type: "commission",
+          amount: commission.amount,
+          status: "completed",
+          method: `referral_level_${commission.level}`,
+          reference,
+        });
+      }
+    });
+
+    res.status(201).json({ success: true, message: "Investment placed successfully" });
+  }),
+);
+
+router.post(
+  "/:id/withdraw-earning",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const investmentId = Number(req.params.id);
+    if (!investmentId) throw new ApiError(400, "Invalid investment ID");
+
+    const investment = await db("investments").where({ id: investmentId, user_id: req.user.id }).first();
+    if (!investment) throw new ApiError(404, "Investment not found");
+
+    const credited = await creditPendingDailyProfits(db, req.user.id);
+    if (credited.credited <= 0) throw new ApiError(400, "No new daily profit is available yet");
+    res.json({
+      success: true,
+      message: "Daily profit credited to wallet",
+      data: { credited: credited.credited, entries: credited.entries },
+    });
+  }),
+);
+
+router.post(
+  "/:id/claim",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const investmentId = Number(req.params.id);
+    if (!investmentId) throw new ApiError(400, "Invalid investment ID");
+
+    const payout = await db.transaction(async (trx) => {
+      await creditPendingDailyProfits(db, req.user.id, trx);
+      const investment = await trx("investments")
+        .join("investment_plans", "investments.plan_id", "investment_plans.id")
+        .select(
+          "investments.id",
+          "investments.user_id as userId",
+          "investments.status",
+          "investments.amount",
+          "investments.start_date as startDate",
+          "investment_plans.duration_days as durationDays",
+          "investment_plans.name as planName",
+        )
+        .where("investments.id", investmentId)
+        .where("investments.user_id", req.user.id)
+        .first();
+      if (!investment) throw new ApiError(404, "Investment not found");
+      if (investment.status !== "active") throw new ApiError(400, "Investment already claimed");
+
+      const maturityDate = getMaturityDate(investment.startDate, investment.durationDays);
+      if (new Date() < maturityDate) {
+        throw new ApiError(400, `Investment matures on ${maturityDate.toISOString().slice(0, 10)}`);
+      }
+
+      const principal = Number(investment.amount || 0);
+      const reference = `INV-CLM-${investment.id}-${Date.now()}`;
+      await adjustWalletBalance(
+        db,
+        {
+          userId: req.user.id,
+          delta: principal,
+          reason: "investment_principal_return",
+          reference,
+        },
+        trx,
+      );
+      // Keep principal frozen even after maturity payout.
+      const wallet = await getOrCreateWallet(db, req.user.id, trx);
+      const lockedRow = await trx("wallets").where({ id: wallet.id }).forUpdate().first();
+      await trx("wallets")
+        .where({ id: wallet.id })
+        .update({
+          locked_balance: Number((Number(lockedRow.locked_balance || 0) + principal).toFixed(2)),
+          updated_at: trx.fn.now(),
+        });
+      await trx("investments")
+        .where({ id: investment.id })
+        .update({ status: "completed", end_date: trx.fn.now(), updated_at: trx.fn.now() });
+      await trx("notifications").insert({
+        user_id: req.user.id,
+        title: "Investment completed",
+        message: `Principal $${principal.toFixed(2)} from ${investment.planName} returned to wallet and remains locked for reinvestment.`,
+      });
+      return principal;
+    });
+
+    res.json({
+      success: true,
+      message: "Investment principal credited to wallet",
+      data: { payout },
+    });
+  }),
+);
+
+module.exports = router;
