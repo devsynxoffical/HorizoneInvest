@@ -11,5 +11,12 @@ export default defineConfig({
     watch: {
       ignored: ['**/Adminpanel/**'],
     },
+    // Use VITE_API_BASE_URL=/api so requests hit the local backend during dev.
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:5000',
+        changeOrigin: true,
+      },
+    },
   },
 })

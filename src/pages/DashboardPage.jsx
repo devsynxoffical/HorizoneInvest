@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom'
 import { useMemo } from 'react'
-import { motion } from 'motion/react'
 import { Activity, ArrowUpRight, DollarSign, Lock, Users, Wallet } from 'lucide-react'
 import {
   Area,
@@ -90,7 +89,14 @@ function DashboardPage() {
       tone: 'violet',
       change: '+8.2%',
     },
-    { label: 'Referrals', value: referralCount, icon: Users, tone: 'rose', change: 'Live' },
+    {
+      label: 'Referrals',
+      value: referralCount,
+      icon: Users,
+      tone: 'rose',
+      change: 'View tree',
+      to: '/referral-tree',
+    },
     {
       label: 'Locked Deposits',
       value: `$${lockedDepositBalance.toFixed(2)}`,
@@ -102,32 +108,40 @@ function DashboardPage() {
 
   return (
     <section className="page-grid">
-      <motion.div className="glass-card" initial={{ opacity: 0, y: -15 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="glass-card">
         <h2 className="page-title">Welcome back, {user.name.split(' ')[0]}!</h2>
         <p className="muted dashboard-subtitle">Here&apos;s what&apos;s happening with your portfolio today.</p>
-      </motion.div>
+      </div>
 
       <div className="metrics-grid">
-        {cards.map((item, index) => (
-          <motion.article
-            key={item.label}
-            className={`glass-card metric ${item.tone}`}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-          >
-            <div className="metric-head">
-              <span className="icon-box">
-                <item.icon size={18} />
-              </span>
-              <p className="muted">{item.label}</p>
-            </div>
-            <h3>{item.value}</h3>
-            <p className="metric-change">
-              <ArrowUpRight size={14} /> {item.change}
-            </p>
-          </motion.article>
-        ))}
+        {cards.map((item) => {
+          const body = (
+            <>
+              <div className="metric-head">
+                <span className="icon-box">
+                  <item.icon size={18} />
+                </span>
+                <p className="muted">{item.label}</p>
+              </div>
+              <h3>{item.value}</h3>
+              <p className="metric-change">
+                <ArrowUpRight size={14} /> {item.change}
+              </p>
+            </>
+          )
+          if (item.to) {
+            return (
+              <Link key={item.label} to={item.to} className={`glass-card metric metric-link ${item.tone}`}>
+                {body}
+              </Link>
+            )
+          }
+          return (
+            <article key={item.label} className={`glass-card metric ${item.tone}`}>
+              {body}
+            </article>
+          )
+        })}
       </div>
 
       <div className="chart-grid">

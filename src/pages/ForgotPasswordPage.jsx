@@ -22,11 +22,15 @@ function ForgotPasswordPage() {
     e.preventDefault()
     setSubmitting(true)
     setError('')
-    const response = await forgotPassword(email)
+    const trimmed = email.trim().toLowerCase()
+    setEmail(trimmed)
+    const response = await forgotPassword(trimmed)
     setSubmitting(false)
     if (response.ok) {
       toast.success(response.message)
-      setStage('otp')
+      // Same response for unknown emails (anti-enumeration); only advance when a code was actually sent.
+      const ambiguous = String(response.message || '').toLowerCase().includes('if an account exists')
+      if (!ambiguous) setStage('otp')
     } else {
       setError(response.message)
     }
@@ -124,19 +128,41 @@ function ForgotPasswordPage() {
                 />
               </div>
               {error && <p className="error-text">{error}</p>}
-              <button 
-                className="btn-primary full-width" 
+              <button
+                type="button"
+                className="btn-primary full-width"
                 onClick={() => otpCode.length === 6 && setStage('new_password')}
                 disabled={otpCode.length !== 6}
               >
                 Continue
               </button>
-              <button 
-                className="btn-ghost full-width" 
+              <button
+                type="button"
+                className="btn-ghost full-width"
                 style={{ marginTop: '0.5rem' }}
-                onClick={() => setStage('email')}
+                onClick={() => {
+                  setOtpCode('')
+                  setError('')
+                  setStage('email')
+                }}
               >
                 Change Email
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline full-width"
+                style={{ marginTop: '0.5rem' }}
+                disabled={submitting}
+                onClick={async () => {
+                  setSubmitting(true)
+                  setError('')
+                  const response = await forgotPassword(email)
+                  setSubmitting(false)
+                  if (response.ok) toast.success(response.message)
+                  else setError(response.message)
+                }}
+              >
+                {submitting ? 'Sending…' : 'Resend code'}
               </button>
             </motion.div>
           )}

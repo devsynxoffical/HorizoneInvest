@@ -12,22 +12,22 @@ import {
 import { RiBarChartLine, RiMoneyDollarCircleLine, RiShieldCheckLine } from 'react-icons/ri'
 import { toast } from 'sonner'
 import { useAppContext } from '../context/AppContext.jsx'
+import { FaWhatsapp } from 'react-icons/fa6'
 import { getSupportedSocialLinks } from '../lib/socialPlatforms.js'
 
 function SignUpPage() {
   const brandLogo = `${import.meta.env.BASE_URL}logo.png`
   const navigate = useNavigate()
-  const { signup, sendOTP, socialLinks } = useAppContext()
+  const { signup, socialLinks } = useAppContext()
   const supportedSocialLinks = getSupportedSocialLinks(socialLinks)
+  const whatsappLink = supportedSocialLinks.find((item) => item.platform === 'whatsapp')
   const [searchParams] = useSearchParams()
-  const [step, setStep] = useState(1) // 1: Info, 2: OTP
   const [form, setForm] = useState({
     name: '',
     email: '',
     phone: '',
     password: '',
     referralCode: searchParams.get('ref') || '',
-    otp: '',
   })
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -35,27 +35,9 @@ function SignUpPage() {
   const handleSubmit = async (event) => {
     event.preventDefault()
     setError('')
-    
-    if (step === 1) {
-      if (form.password.length < 8) {
-        setError('Password must be at least 8 characters.')
-        return
-      }
-      setSubmitting(true)
-      const response = await sendOTP(form.email)
-      setSubmitting(false)
-      if (response.ok) {
-        toast.success(response.message)
-        setStep(2)
-      } else {
-        setError(response.message)
-      }
-      return
-    }
 
-    // Step 2: Register
-    if (form.otp.length !== 6) {
-      setError('Please enter a valid 6-digit OTP.')
+    if (form.password.length < 8) {
+      setError('Password must be at least 8 characters.')
       return
     }
 
@@ -120,96 +102,77 @@ function SignUpPage() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <h3>{step === 1 ? 'Create Account' : 'Verify Email'}</h3>
-          <p className="muted">
-            {step === 1 
-              ? 'Start earning with HorizonInvest today.' 
-              : `We've sent a 6-digit code to ${form.email}`}
-          </p>
+          <h3>Create Account</h3>
+          <p className="muted">Start earning with HorizonInvest today.</p>
+          {whatsappLink?.url ? (
+            <a className="whatsapp-inline-banner" href={whatsappLink.url} target="_blank" rel="noreferrer">
+              <FaWhatsapp size={18} />
+              <span>
+                <strong>Join our WhatsApp Channel</strong>
+                <small>Tap to join before you sign up</small>
+              </span>
+            </a>
+          ) : null}
 
-          {step === 1 ? (
-            <>
-              <label>Full Name</label>
-              <div className="input-wrap cyan">
-                <FiUser size={17} />
-                <input
-                  type="text"
-                  value={form.name}
-                  onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-                  required
-                />
-              </div>
+          <label>Full Name</label>
+          <div className="input-wrap cyan">
+            <FiUser size={17} />
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+              required
+            />
+          </div>
 
-              <label>Email</label>
-              <div className="input-wrap cyan">
-                <FiMail size={17} />
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
-                  required
-                />
-              </div>
+          <label>Email</label>
+          <div className="input-wrap cyan">
+            <FiMail size={17} />
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+              required
+            />
+          </div>
 
-              <label>Phone Number</label>
-              <div className="input-wrap cyan">
-                <FiPhone size={17} />
-                <input
-                  type="tel"
-                  value={form.phone}
-                  onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
-                  required
-                />
-              </div>
+          <label>Phone Number</label>
+          <div className="input-wrap cyan">
+            <FiPhone size={17} />
+            <input
+              type="tel"
+              value={form.phone}
+              onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
+              required
+            />
+          </div>
 
-              <label>Password</label>
-              <div className="input-wrap cyan">
-                <FiLock size={17} />
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
-                  required
-                />
-              </div>
+          <label>Password</label>
+          <div className="input-wrap cyan">
+            <FiLock size={17} />
+            <input
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm((prev) => ({ ...prev, password: e.target.value }))}
+              required
+            />
+          </div>
 
-              <label>Referral Code (optional)</label>
-              <div className="input-wrap cyan">
-                <FiGift size={17} />
-                <input
-                  type="text"
-                  value={form.referralCode}
-                  onChange={(e) => setForm((prev) => ({ ...prev, referralCode: e.target.value }))}
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <label>Enter 6-Digit OTP</label>
-              <div className="input-wrap cyan">
-                <FiLock size={17} />
-                <input
-                  type="text"
-                  placeholder="000000"
-                  maxLength={6}
-                  value={form.otp}
-                  onChange={(e) => setForm((prev) => ({ ...prev, otp: e.target.value.replace(/\D/g, '') }))}
-                  required
-                />
-              </div>
-              <p className="muted center" style={{ marginTop: '10px' }}>
-                Didn't receive code? <button type="button" className="btn-link" onClick={() => setStep(1)} style={{ color: 'var(--cyan-primary)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}>Edit email</button>
-              </p>
-            </>
-          )}
+          <label>Referral Code (optional)</label>
+          <div className="input-wrap cyan">
+            <FiGift size={17} />
+            <input
+              type="text"
+              value={form.referralCode}
+              onChange={(e) => setForm((prev) => ({ ...prev, referralCode: e.target.value }))}
+            />
+          </div>
 
           <p className="muted">By signing up, you agree to Terms and Privacy Policy.</p>
           {error ? <p className="alert alert-error">{error}</p> : null}
 
           <button className="btn btn-cyan" type="submit" disabled={submitting}>
-            {submitting 
-              ? (step === 1 ? 'Sending...' : 'Verifying...') 
-              : (step === 1 ? 'Create Account' : 'Verify & Register')} 
+            {submitting ? 'Creating account...' : 'Create Account'}
             <FiArrowRight size={15} />
           </button>
           <p className="muted center">

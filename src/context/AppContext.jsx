@@ -80,7 +80,7 @@ export function AppProvider({ children }) {
     try {
       const response = await request('/site-links')
       setSocialLinks(response?.data || [])
-    } catch (_error) {
+    } catch {
       setSocialLinks([])
     }
   }, [])
@@ -219,7 +219,7 @@ export function AppProvider({ children }) {
         setIsBootstrapping(false)
         // Fetch the remaining dashboard data in background to speed up first paint.
         refreshCoreData().catch(() => {})
-      } catch (_error) {
+      } catch {
         clearTokens()
         if (active) {
           setIsAuthenticated(false)
@@ -235,10 +235,11 @@ export function AppProvider({ children }) {
   }, [fetchSocialLinks, refreshCoreData])
 
   const login = async ({ email, password }) => {
+    const normalized = String(email || '').trim().toLowerCase()
     try {
       const response = await request('/auth/login', {
         method: 'POST',
-        body: { email, password },
+        body: { email: normalized, password },
       })
       setTokens(response.data.accessToken, response.data.refreshToken)
       setIsAuthenticated(true)
@@ -250,10 +251,18 @@ export function AppProvider({ children }) {
   }
 
   const signup = async ({ name, email, phone, password, referralCode, otp }) => {
+    const normalized = String(email || '').trim().toLowerCase()
     try {
       const response = await request('/auth/register', {
         method: 'POST',
-        body: { name, email, phone, password, referralCode: referralCode || undefined, otp },
+        body: {
+          name,
+          email: normalized,
+          phone: phone || undefined,
+          password,
+          referralCode: referralCode || undefined,
+          ...(otp ? { otp } : {}),
+        },
       })
       setTokens(response.data.accessToken, response.data.refreshToken)
       setIsAuthenticated(true)
@@ -265,11 +274,21 @@ export function AppProvider({ children }) {
   }
 
   const sendOTP = async (email) => {
+    const normalized = String(email || '').trim().toLowerCase()
     try {
       const response = await request('/auth/send-otp', {
         method: 'POST',
-        body: { email },
+        body: { email: normalized },
       })
+      if (response?.data?.otpRequired === false) {
+        return {
+          ok: true,
+          message:
+            response.message ||
+            'Email verification is not required. Enter 000000 on the next screen to finish signup.',
+          verificationSkipped: true,
+        }
+      }
       return { ok: true, message: response.message || 'OTP sent successfully.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Failed to send OTP.' }
@@ -277,10 +296,11 @@ export function AppProvider({ children }) {
   }
 
   const forgotPassword = async (email) => {
+    const normalized = String(email || '').trim().toLowerCase()
     try {
       const response = await request('/auth/forgot-password', {
         method: 'POST',
-        body: { email },
+        body: { email: normalized },
       })
       return { ok: true, message: response.message || 'Reset code sent successfully.' }
     } catch (error) {
@@ -289,10 +309,11 @@ export function AppProvider({ children }) {
   }
 
   const resetPassword = async ({ email, code, newPassword }) => {
+    const normalized = String(email || '').trim().toLowerCase()
     try {
       const response = await request('/auth/reset-password', {
         method: 'POST',
-        body: { email, code, newPassword },
+        body: { email: normalized, code, newPassword },
       })
       return { ok: true, message: response.message || 'Password reset successful.' }
     } catch (error) {
@@ -309,7 +330,7 @@ export function AppProvider({ children }) {
           body: { refreshToken: savedRefreshToken },
         })
       }
-    } catch (_error) {
+    } catch {
       // ignore logout request errors and clear session locally
     } finally {
       clearTokens()
@@ -490,6 +511,7 @@ export function AppProvider({ children }) {
       withdrawInvestmentEarning,
       markNotificationRead,
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handler identities omitted to keep a stable provider value
     [
       isAuthenticated,
       isBootstrapping,

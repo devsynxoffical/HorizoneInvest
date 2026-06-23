@@ -1,10 +1,13 @@
 RewriteEngine On
 RewriteBase /
 
-# Serve existing files/directories directly
+# Serve existing files/directories directly (includes /admin/assets/*)
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
 RewriteRule ^ - [L]
 
-# SPA fallback
+# Admin panel SPA — /admin/deposits, /admin/users, etc.
+RewriteRule ^admin(?:/.*)?$ admin/index.html [L]
+
+# Main site SPA fallback
 RewriteRule ^ index.html [L]

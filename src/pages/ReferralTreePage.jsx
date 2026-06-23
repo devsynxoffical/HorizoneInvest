@@ -83,7 +83,7 @@ function ReferralTreePage() {
   }
 
   return (
-    <section className="page-grid referral-page">
+    <section className="page-grid referral-page mobile-friendly-page">
       <div className="glass-card referral-hero">
         <span className="pill-badge violet">
           <FiGift size={14} /> Referral Program
@@ -176,32 +176,97 @@ function ReferralTreePage() {
             </div>
           </article>
         </div>
-        <div className="recent-list">
-          {[...directReferrals, ...indirectReferrals].slice(0, 15).map((entry) => (
-            <article key={`${entry.id}-${entry.level}`} className="recent-item">
-              <div className="recent-left">
-                <span className="recent-avatar">
-                  {String(entry.name || '')
-                    .split(' ')
-                    .map((part) => part[0] || '')
-                    .join('')
-                    .slice(0, 2)
-                    .toUpperCase() || 'RF'}
-                </span>
-                <div>
-                  <strong>{entry.name}</strong>
-                  <p className="muted small">
-                    {entry.email} • {Number(entry.level) === 1 ? 'Direct' : `Indirect (L${entry.level})`}
-                  </p>
+        <div className="mobile-record-list" style={{ marginTop: '1rem' }}>
+          {[...directReferrals, ...indirectReferrals].slice(0, 50).length ? (
+            [...directReferrals, ...indirectReferrals].slice(0, 50).map((entry) => (
+              <article key={`${entry.id}-${entry.level}-card`} className="mobile-record-card">
+                <div className="mobile-record-row">
+                  <span className="muted small">User</span>
+                  <strong>{entry.username || entry.name}</strong>
                 </div>
-              </div>
-              <div className="recent-right">
-                <strong>${Number(entry.totalInvested || 0).toFixed(2)}</strong>
-                <span className="muted small">{Number(entry.investmentCount || 0)} investment(s)</span>
-              </div>
-            </article>
-          ))}
-          {!referralTree.length ? <p className="muted">No direct/indirect referrals yet.</p> : null}
+                <div className="mobile-record-row">
+                  <span className="muted small">Email</span>
+                  <span>{entry.email}</span>
+                </div>
+                <div className="mobile-record-row">
+                  <span className="muted small">Level</span>
+                  <strong>{Number(entry.level) === 1 ? 'Direct' : `L${entry.level}`}</strong>
+                </div>
+                <div className="mobile-record-row">
+                  <span className="muted small">Deposits</span>
+                  <span>
+                    ${Number(entry.totalDeposits || 0).toFixed(2)} ({entry.completedDepositCount || 0} tx)
+                  </span>
+                </div>
+                <div className="mobile-record-row">
+                  <span className="muted small">Withdrawals</span>
+                  <span>
+                    ${Number(entry.totalWithdrawals || 0).toFixed(2)} ({entry.completedWithdrawalCount || 0} tx)
+                  </span>
+                </div>
+                <div className="mobile-record-row">
+                  <span className="muted small">Invested</span>
+                  <span>
+                    ${Number(entry.totalInvested || 0).toFixed(2)} · {entry.investmentCount || 0} inv.
+                  </span>
+                </div>
+              </article>
+            ))
+          ) : (
+            <p className="muted">No direct/indirect referrals yet.</p>
+          )}
+        </div>
+
+        <div className="table-wrap table-wrap--desktop" style={{ marginTop: '1rem' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Email</th>
+                <th>Level</th>
+                <th>Deposits</th>
+                <th>Withdrawals</th>
+                <th>Invested</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...directReferrals, ...indirectReferrals].slice(0, 50).map((entry) => (
+                <tr key={`${entry.id}-${entry.level}`}>
+                  <td>{entry.username || entry.name}</td>
+                  <td>{entry.email}</td>
+                  <td>{Number(entry.level) === 1 ? 'Direct' : `L${entry.level}`}</td>
+                  <td>
+                    ${Number(entry.totalDeposits || 0).toFixed(2)}
+                    <span className="muted small">
+                      {' '}
+                      ({Number(entry.completedDepositCount || 0)} tx)
+                    </span>
+                  </td>
+                  <td>
+                    ${Number(entry.totalWithdrawals || 0).toFixed(2)}
+                    <span className="muted small">
+                      {' '}
+                      ({Number(entry.completedWithdrawalCount || 0)} tx)
+                    </span>
+                  </td>
+                  <td>
+                    ${Number(entry.totalInvested || 0).toFixed(2)}
+                    <span className="muted small">
+                      {' '}
+                      · {Number(entry.investmentCount || 0)} inv.
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              {!referralTree.length ? (
+                <tr>
+                  <td colSpan="6" className="muted">
+                    No direct/indirect referrals yet.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </div>
 

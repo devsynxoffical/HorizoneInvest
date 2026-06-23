@@ -14,11 +14,12 @@ import {
 } from 'lucide-react'
 import { useAdmin } from '../state/AdminContext.jsx'
 
-function StatCard({ label, value, icon: Icon }) {
+function StatCard({ label, value, icon }) {
+  const IconGlyph = icon
   return (
     <article className="stat-card">
       <div className="stat-head">
-        <Icon size={16} />
+        <IconGlyph size={16} />
         <span>{label}</span>
       </div>
       <h3>{value}</h3>

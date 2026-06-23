@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   BadgeDollarSign,
   ArrowDownToLine,
@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Info,
   LogOut,
+  MessageCircle,
   MessageSquare,
   Settings,
   TrendingUp,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useAppContext } from '../context/AppContext.jsx'
 import LiveChatWidget from '../components/LiveChatWidget.jsx'
+import MobilePageBack from '../components/MobilePageBack.jsx'
 import AppInstallPrompt from '../components/AppInstallPrompt.jsx'
 import ThemeToggle from '../components/ThemeToggle.jsx'
 import { getSupportedSocialLinks } from '../lib/socialPlatforms.js'
@@ -34,9 +36,15 @@ const navItems = [
 
 function AppLayout() {
   const brandLogo = `${import.meta.env.BASE_URL}logo.png`
+  const location = useLocation()
   const { user, logout, notifications, markNotificationRead, socialLinks } = useAppContext()
   const supportedSocialLinks = useMemo(() => getSupportedSocialLinks(socialLinks), [socialLinks])
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
+  const [isChatOpen, setIsChatOpen] = useState(false)
+
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [location.pathname])
   const orderedNotifications = useMemo(
     () =>
       [...notifications].sort(
@@ -131,7 +139,12 @@ function AppLayout() {
               <Bell size={16} />
               {unreadCount ? <span className="notify-badge">{unreadCount}</span> : null}
             </button>
-            <button className="icon-btn">
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Open support chat"
+              onClick={() => setIsChatOpen(true)}
+            >
               <MessageSquare size={16} />
             </button>
             <div className="avatar-wrap">
@@ -144,7 +157,10 @@ function AppLayout() {
           </div>
         </header>
 
-        <Outlet />
+        <MobilePageBack />
+        <div className="page-outlet" key={location.pathname}>
+          <Outlet />
+        </div>
       </main>
       {isNotificationsOpen ? (
         <aside className="notify-panel glass-card">
@@ -174,7 +190,17 @@ function AppLayout() {
         </aside>
       ) : null}
       <AppInstallPrompt />
-      <LiveChatWidget />
+      <LiveChatWidget isOpen={isChatOpen} onOpenChange={setIsChatOpen} />
+      {!isChatOpen ? (
+        <button
+          type="button"
+          className="chat-fab"
+          onClick={() => setIsChatOpen(true)}
+          aria-label="Open live support chat"
+        >
+          <MessageCircle size={22} />
+        </button>
+      ) : null}
     </div>
   )
 }

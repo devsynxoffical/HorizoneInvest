@@ -31,11 +31,11 @@ function TransactionsPage() {
   }, [filtered])
 
   return (
-    <section className="page-grid">
+    <section className="page-grid mobile-friendly-page">
       <div className="glass-card">
         <h2 className="page-title">Transaction History</h2>
         <p className="muted">Complete record of deposits, investments, earnings, commissions, and withdrawals.</p>
-        <div className="plan-actions">
+        <div className="plan-actions mobile-filter-stack">
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
             <option value="all">All Types</option>
             <option value="deposit">Deposit</option>
@@ -87,7 +87,42 @@ function TransactionsPage() {
       </div>
 
       <div className="glass-card">
-        <div className="table-wrap">
+        <div className="mobile-record-list">
+          {filtered.length ? (
+            filtered.map((txn) => (
+              <article key={txn.id} className="mobile-record-card">
+                <div className="mobile-record-row">
+                  <span className="muted small">ID</span>
+                  <strong>{txn.id}</strong>
+                </div>
+                <div className="mobile-record-row">
+                  <span className="muted small">Type</span>
+                  <strong className="capitalize">{txn.type}</strong>
+                </div>
+                <div className="mobile-record-row">
+                  <span className="muted small">Method</span>
+                  <span>{txn.method}</span>
+                </div>
+                <div className="mobile-record-row">
+                  <span className="muted small">Amount</span>
+                  <strong>${Number(txn.amount).toFixed(2)}</strong>
+                </div>
+                <div className="mobile-record-row">
+                  <span className="muted small">Status</span>
+                  <span className={`status ${txn.status}`}>{txn.status}</span>
+                </div>
+                <div className="mobile-record-row">
+                  <span className="muted small">Date</span>
+                  <span>{txn.date}</span>
+                </div>
+              </article>
+            ))
+          ) : (
+            <p className="muted">No transactions match your filters.</p>
+          )}
+        </div>
+
+        <div className="table-wrap table-wrap--desktop">
           <table>
             <thead>
               <tr>

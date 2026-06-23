@@ -33,10 +33,13 @@ function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AdminLayout />}>
           <Route index element={<DashboardPage />} />
+          <Route path="/dashboard" element={<Navigate to="/" replace />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/plans" element={<PlansPage />} />
           <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/deposits" element={<DepositsPage />} />
+          <Route path="/deposit" element={<Navigate to="/deposits" replace />} />
+          <Route path="/despoit" element={<Navigate to="/deposits" replace />} />
           <Route path="/withdrawals" element={<WithdrawalsPage />} />
           <Route path="/payment-accounts" element={<PaymentAccountsPage />} />
           <Route path="/social-links" element={<SocialLinksPage />} />

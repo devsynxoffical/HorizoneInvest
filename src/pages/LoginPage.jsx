@@ -4,6 +4,7 @@ import { motion } from 'motion/react'
 import { ArrowRight, Lock, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAppContext } from '../context/AppContext.jsx'
+import { FaWhatsapp } from 'react-icons/fa6'
 import { getSupportedSocialLinks } from '../lib/socialPlatforms.js'
 
 function LoginPage() {
@@ -11,6 +12,7 @@ function LoginPage() {
   const navigate = useNavigate()
   const { login, socialLinks } = useAppContext()
   const supportedSocialLinks = getSupportedSocialLinks(socialLinks)
+  const whatsappLink = supportedSocialLinks.find((item) => item.platform === 'whatsapp')
   const [form, setForm] = useState({ email: '', password: '' })
   const [submitting, setSubmitting] = useState(false)
 
@@ -69,6 +71,15 @@ function LoginPage() {
         >
           <h3>Welcome Back</h3>
           <p className="muted">Sign in to your account</p>
+          {whatsappLink?.url ? (
+            <a className="whatsapp-inline-banner" href={whatsappLink.url} target="_blank" rel="noreferrer">
+              <FaWhatsapp size={18} />
+              <span>
+                <strong>Join our WhatsApp Channel</strong>
+                <small>Tap to join community updates</small>
+              </span>
+            </a>
+          ) : null}
           <label>Email</label>
           <div className="input-wrap">
             <Mail size={18} />

@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Activity, Ban, ShieldCheck, UserCircle2, Wallet } from 'lucide-react'
+import { Activity, Ban, Network, ShieldCheck, UserCircle2, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAdmin } from '../state/AdminContext.jsx'
 
-function UserStat({ label, value, icon: Icon }) {
+function UserStat({ label, value, icon }) {
+  const IconGlyph = icon
   return (
     <article className="stat-card">
       <div className="stat-head">
-        <Icon size={16} />
+        <IconGlyph size={16} />
         <span>{label}</span>
       </div>
       <h3>{value}</h3>
@@ -17,9 +18,20 @@ function UserStat({ label, value, icon: Icon }) {
 }
 
 function UsersPage() {
-  const { users, blockUser, refreshUsers, adjustUserWallet, getUserOverview, impersonateUser, updateUserDetails } =
-    useAdmin()
+  const {
+    users,
+    blockUser,
+    refreshUsers,
+    adjustUserWallet,
+    getUserOverview,
+    getUserReferralNetwork,
+    impersonateUser,
+    updateUserDetails,
+  } = useAdmin()
   const [overview, setOverview] = useState(null)
+  const [referralData, setReferralData] = useState(null)
+  const [referralLoading, setReferralLoading] = useState(false)
+  const [referralError, setReferralError] = useState('')
   const [loadingOverviewId, setLoadingOverviewId] = useState(null)
   const [query, setQuery] = useState('')
   const [detailTab, setDetailTab] = useState('profile')
@@ -69,6 +81,29 @@ function UsersPage() {
       }
     })()
   }, [searchParams, setSearchParams, users, getUserOverview])
+
+  useEffect(() => {
+    if (!overview?.user?.id || detailTab !== 'referrals') return undefined
+    let cancelled = false
+    setReferralLoading(true)
+    setReferralError('')
+    getUserReferralNetwork(overview.user.id)
+      .then((data) => {
+        if (!cancelled) setReferralData(data)
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setReferralData(null)
+          setReferralError(error.message || 'Failed to load referral network')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReferralLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [overview?.user?.id, detailTab, getUserReferralNetwork])
 
   const handleToggle = async (user) => {
     try {
@@ -186,6 +221,7 @@ function UsersPage() {
 
   const detailTabs = [
     { key: 'profile', label: 'Profile' },
+    { key: 'referrals', label: 'Referral network' },
     { key: 'transactions', label: 'Transactions' },
     { key: 'investments', label: 'Investments' },
     { key: 'deposits', label: 'Deposits' },
@@ -319,7 +355,14 @@ function UsersPage() {
       </div>
 
       {overview ? (
-        <div className="record-modal" onClick={() => setOverview(null)}>
+        <div
+          className="record-modal"
+          onClick={() => {
+            setReferralData(null)
+            setReferralError('')
+            setOverview(null)
+          }}
+        >
           <div className="record-modal-card" onClick={(event) => event.stopPropagation()}>
             <div className="user-overview-head">
               <div>
@@ -330,7 +373,14 @@ function UsersPage() {
                   {Number(overview.user?.lockedBalance || 0).toFixed(2)}
                 </p>
               </div>
-              <button className="mini-btn" onClick={() => setOverview(null)}>
+              <button
+                className="mini-btn"
+                onClick={() => {
+                  setReferralData(null)
+                  setReferralError('')
+                  setOverview(null)
+                }}
+              >
                 Close
               </button>
             </div>
@@ -392,6 +442,95 @@ function UsersPage() {
                 </button>
               ))}
             </div>
+
+            {detailTab === 'referrals' ? (
+              <div className="user-overview-table-wrap">
+                <h4>
+                  <Network size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+                  Referral network (downline)
+                </h4>
+                {referralLoading ? (
+                  <p className="muted">Loading referral data…</p>
+                ) : referralError ? (
+                  <p className="error-text">{referralError}</p>
+                ) : referralData ? (
+                  <>
+                    <div className="user-overview-grid" style={{ marginBottom: '1rem' }}>
+                      <div className="user-overview-tile">
+                        <strong>Summary</strong>
+                        <p>Direct: {referralData.summary?.directReferrals ?? 0}</p>
+                        <p>Indirect: {referralData.summary?.indirectReferrals ?? 0}</p>
+                        <p>Total downline: {referralData.summary?.totalReferrals ?? 0}</p>
+                        <p>
+                          Commission earned (this user): $
+                          {Number(referralData.summary?.totalCommissionEarnings || 0).toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="user-overview-tile">
+                        <strong>Referral link</strong>
+                        <p className="muted small" style={{ wordBreak: 'break-all' }}>
+                          Code: {referralData.referralCode || '—'}
+                        </p>
+                        {referralData.referralLink ? (
+                          <p className="muted small" style={{ wordBreak: 'break-all' }}>
+                            {referralData.referralLink}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>Username</th>
+                          <th>Email</th>
+                          <th>Phone</th>
+                          <th>Level</th>
+                          <th>Joined</th>
+                          <th>Deposits</th>
+                          <th>Withdrawals</th>
+                          <th>Invested</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(referralData.network || []).length ? (
+                          referralData.network.map((row) => (
+                            <tr key={`${row.id}-${row.level}`}>
+                              <td>{row.id}</td>
+                              <td>{row.username || row.name}</td>
+                              <td>{row.email}</td>
+                              <td>{row.phone || '—'}</td>
+                              <td>{Number(row.level) === 1 ? 'Direct' : `L${row.level}`}</td>
+                              <td>{String(row.joinedAt || '').slice(0, 10) || '—'}</td>
+                              <td>
+                                ${Number(row.totalDeposits || 0).toFixed(2)}
+                                <span className="muted small"> ({row.completedDepositCount || 0})</span>
+                              </td>
+                              <td>
+                                ${Number(row.totalWithdrawals || 0).toFixed(2)}
+                                <span className="muted small"> ({row.completedWithdrawalCount || 0})</span>
+                              </td>
+                              <td>
+                                ${Number(row.totalInvested || 0).toFixed(2)}
+                                <span className="muted small"> ({row.investmentCount || 0})</span>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={9} className="table-empty">
+                              No referrals in this user&apos;s network yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </>
+                ) : (
+                  <p className="muted">No data.</p>
+                )}
+              </div>
+            ) : null}
 
             {detailTab === 'profile' ? (
               <div className="user-overview-grid">

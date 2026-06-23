@@ -12,9 +12,31 @@ const ApiError = require("../../utils/ApiError");
 const { signAccessToken, signRefreshToken } = require("../../utils/tokens");
 const { generateReferralCode, generateReferralLinkToken } = require("../../utils/referrals");
 const { getOrCreateWallet, adjustWalletBalance } = require("../../services/walletService");
-const { sendOTPEmail } = require("../../services/emailService");
+const { sendOTPEmail, OTP_PURPOSE } = require("../../services/emailService");
 
 const router = express.Router();
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function deliverOtpEmail(email, otp, purpose) {
+  const { smtp, nodeEnv } = env;
+  if (!smtp.host || !smtp.user || !smtp.fromEmail) {
+    if (nodeEnv === "development") {
+      // eslint-disable-next-line no-console
+      console.warn(`[auth] SMTP not configured — code for ${email}: ${otp} (${purpose})`);
+      return;
+    }
+    throw new ApiError(503, "Email is not configured. Please try again later or contact support.");
+  }
+  try {
+    await sendOTPEmail(email, otp, purpose);
+  } catch (err) {
+    const detail = nodeEnv === "development" && err?.message ? ` ${err.message}` : "";
+    throw new ApiError(503, `Unable to send email.${detail}`);
+  }
+}
 const authLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 100, // Loosened for development
@@ -27,10 +49,16 @@ router.use(authLimiter);
 const registerSchema = z.object({
   name: z.string().min(2),
   email: z.email(),
-  phone: z.string().min(6).optional(),
+  phone: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.string().min(6).optional(),
+  ),
   password: z.string().min(8),
-  referralCode: z.string().optional(),
-  otp: z.string().length(6),
+  referralCode: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.string().optional(),
+  ),
+  otp: z.string().length(6).optional(),
 });
 
 const sendOtpSchema = z.object({
@@ -56,22 +84,39 @@ const resetPasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
+router.get("/signup-config", (_req, res) => {
+  res.json({
+    success: true,
+    data: { otpRequired: !env.skipSignupOtp },
+  });
+});
+
 router.post(
   "/send-otp",
   validate(sendOtpSchema),
   asyncHandler(async (req, res) => {
-    const { email } = req.body;
+    if (env.skipSignupOtp) {
+      return res.json({
+        success: true,
+        message:
+          "Email verification is not required. If you see a code screen next, enter 000000 to finish signup.",
+        data: { otpRequired: false },
+      });
+    }
+    const email = normalizeEmail(req.body.email);
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    await db("otps")
-      .insert({
-        email,
-        code: otp,
-        expires_at: expiresAt,
-      });
+    await db("otps").where({ email }).andWhere("type", "verification").del();
+    await db("otps").insert({
+      email,
+      user_id: null,
+      code: otp,
+      expires_at: expiresAt,
+      type: "verification",
+    });
 
-    await sendOTPEmail(email, otp);
+    await deliverOtpEmail(email, otp, OTP_PURPOSE.signup);
 
     res.json({ success: true, message: "OTP sent successfully" });
   }),
@@ -81,17 +126,20 @@ router.post(
   "/register",
   validate(registerSchema),
   asyncHandler(async (req, res) => {
-    const { name, email, phone, password, referralCode, otp } = req.body;
+    const { name, phone, password, referralCode, otp } = req.body;
+    const email = normalizeEmail(req.body.email);
     const existing = await db("users").where({ email }).first();
     if (existing) throw new ApiError(409, "Email already in use");
 
-    // Verify OTP
-    const validOtp = await db("otps")
-      .where({ email, code: otp })
-      .andWhere("expires_at", ">", new Date())
-      .first();
+    if (!env.skipSignupOtp) {
+      if (!otp) throw new ApiError(400, "Email verification code is required.");
+      const validOtp = await db("otps")
+        .where({ email, code: otp, type: "verification" })
+        .andWhere("expires_at", ">", new Date())
+        .first();
 
-    if (!validOtp) throw new ApiError(400, "Invalid or expired OTP");
+      if (!validOtp) throw new ApiError(400, "Invalid or expired OTP");
+    }
 
     const passwordHash = await bcrypt.hash(password, 10);
     const userId = await db.transaction(async (trx) => {
@@ -171,8 +219,10 @@ router.post(
       return nextUserId;
     });
 
-    // Delete OTP after successful registration
-    await db("otps").where({ email, code: otp }).del();
+    // Delete OTP after successful registration when verification was required.
+    if (!env.skipSignupOtp && otp) {
+      await db("otps").where({ email, code: otp, type: "verification" }).del();
+    }
 
     const payload = { id: userId, email, role: "user" };
     const accessToken = signAccessToken(payload);
@@ -199,7 +249,8 @@ router.post(
   "/login",
   validate(loginSchema),
   asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
+    const email = normalizeEmail(req.body.email);
+    const { password } = req.body;
     const user = await db("users")
       .leftJoin("roles", "users.role_id", "roles.id")
       .select("users.*", "roles.name as role_name")
@@ -287,7 +338,7 @@ router.post(
   "/forgot-password",
   validate(forgotPasswordSchema),
   asyncHandler(async (req, res) => {
-    const { email } = req.body;
+    const email = normalizeEmail(req.body.email);
     const user = await db("users").where({ email }).first();
 
     // Return success message for unknown emails to avoid user enumeration.
@@ -305,9 +356,10 @@ router.post(
       email,
       code: otp,
       expires_at: expiresAt,
+      type: "password_reset",
     });
 
-    await sendOTPEmail(email, otp);
+    await deliverOtpEmail(email, otp, OTP_PURPOSE.passwordReset);
     res.json({ success: true, message: "Password reset code sent to your email." });
   }),
 );
@@ -316,12 +368,13 @@ router.post(
   "/reset-password",
   validate(resetPasswordSchema),
   asyncHandler(async (req, res) => {
-    const { email, code, newPassword } = req.body;
+    const email = normalizeEmail(req.body.email);
+    const { code, newPassword } = req.body;
     const user = await db("users").where({ email }).first();
     if (!user) throw new ApiError(400, "Invalid or expired reset code.");
 
     const validOtp = await db("otps")
-      .where({ email, code })
+      .where({ email, code, type: "password_reset" })
       .andWhere("expires_at", ">", new Date())
       .first();
 
@@ -329,7 +382,7 @@ router.post(
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
     await db("users").where({ id: user.id }).update({ password_hash: passwordHash, updated_at: db.fn.now() });
-    await db("otps").where({ email, code }).del();
+    await db("otps").where({ email, code, type: "password_reset" }).del();
     await db("sessions").where({ user_id: user.id }).del();
 
     res.json({ success: true, message: "Password has been reset successfully." });

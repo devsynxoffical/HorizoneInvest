@@ -1,35 +1,48 @@
 import { useEffect, useState } from 'react'
-import { motion } from 'motion/react'
 import { MessageCircle, Send, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { request } from '../lib/api.js'
 import { useAppContext } from '../context/AppContext.jsx'
 
-function LiveChatWidget() {
+function LiveChatWidget({ isOpen: controlledOpen, onOpenChange }) {
   const { isAuthenticated } = useAppContext()
-  const [isOpen, setIsOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const isOpen = controlledOpen ?? internalOpen
+  const setIsOpen = (next) => {
+    if (onOpenChange) onOpenChange(next)
+    else setInternalOpen(next)
+  }
   const [input, setInput] = useState('')
   const [roomKey, setRoomKey] = useState('')
+  const [connecting, setConnecting] = useState(false)
   const [messages, setMessages] = useState([
-    { id: 1, from: 'bot', text: 'Hi! I am HorizonInvest AI support. How can I help today?' },
+    { id: 1, from: 'bot', text: 'Hi! I am HorizonInvest support. How can I help today?' },
   ])
 
   useEffect(() => {
     const bootstrapChat = async () => {
       if (!isAuthenticated || !isOpen) return
+      setConnecting(true)
       try {
         const roomRes = await request('/chat/room', { method: 'POST' })
-        const key = roomRes?.data?.room_key || roomRes?.data?.roomKey || ''
-        if (!key) return
+        const room = roomRes?.data || {}
+        const key = room.room_key || room.roomKey || ''
+        if (!key) {
+          toast.error('Could not start support chat. Please try again.')
+          return
+        }
         setRoomKey(key)
-        const messageRes = await request(`/chat/${key}/messages`)
+        const messageRes = await request(`/chat/${encodeURIComponent(key)}/messages`)
         const liveMessages = (messageRes?.data || []).map((item) => ({
           id: item.id,
           from: item.senderRole === 'user' ? 'user' : 'bot',
           text: item.content,
         }))
-        setMessages((prev) => (liveMessages.length ? liveMessages : prev))
-      } catch (_error) {
-        // keep local fallback chat UI when backend chat is unavailable
+        if (liveMessages.length) setMessages(liveMessages)
+      } catch (error) {
+        toast.error(error.message || 'Support chat is temporarily unavailable.')
+      } finally {
+        setConnecting(false)
       }
     }
     bootstrapChat()
@@ -40,14 +53,14 @@ function LiveChatWidget() {
     let cancelled = false
     const syncMessages = async () => {
       try {
-        const messageRes = await request(`/chat/${roomKey}/messages`)
+        const messageRes = await request(`/chat/${encodeURIComponent(roomKey)}/messages`)
         const liveMessages = (messageRes?.data || []).map((item) => ({
           id: item.id,
           from: item.senderRole === 'user' ? 'user' : 'bot',
           text: item.content,
         }))
-        if (!cancelled) setMessages((prev) => (liveMessages.length ? liveMessages : prev))
-      } catch (_error) {
+        if (!cancelled && liveMessages.length) setMessages(liveMessages)
+      } catch {
         // keep existing messages when polling fails
       }
     }
@@ -60,61 +73,57 @@ function LiveChatWidget() {
   }, [isAuthenticated, isOpen, roomKey])
 
   const sendMessage = async () => {
-    if (!input.trim()) return
-    const userMessage = { id: Date.now(), from: 'user', text: input.trim() }
+    const text = input.trim()
+    if (!text) return
+    if (!isAuthenticated) {
+      toast.error('Please log in to use live support.')
+      return
+    }
+    if (!roomKey) {
+      toast.error('Connecting to support… please wait a moment.')
+      return
+    }
+
+    const userMessage = { id: Date.now(), from: 'user', text }
     setMessages((prev) => [...prev, userMessage])
-    if (isAuthenticated && roomKey) {
-      try {
-        await request('/chat/message', {
-          method: 'POST',
-          body: { roomKey, content: input.trim() },
-        })
-      } catch (_error) {
-        // fallback message for connection issues
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now() + 2,
-            from: 'bot',
-            text: 'Support is temporarily offline. Please try again shortly.',
-          },
-        ])
-      }
-    } else {
+    setInput('')
+
+    try {
+      await request('/chat/message', {
+        method: 'POST',
+        body: { roomKey, content: text },
+      })
+    } catch (error) {
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now() + 1,
+          id: Date.now() + 2,
           from: 'bot',
-          text: 'Please log in to start a live support chat.',
+          text: error.message || 'Support is temporarily offline. Please try again shortly.',
         },
       ])
     }
-    setInput('')
   }
 
   return (
     <>
-      {!isOpen ? (
-        <button className="chat-fab" onClick={() => setIsOpen(true)}>
+      {controlledOpen === undefined && !isOpen ? (
+        <button type="button" className="chat-fab" onClick={() => setIsOpen(true)} aria-label="Open live support chat">
           <MessageCircle size={22} />
         </button>
       ) : null}
       {isOpen ? (
-        <motion.div
-          className="chat-panel"
-          initial={{ opacity: 0, scale: 0.8, y: 20 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-        >
+        <div className="chat-panel chat-panel-open" role="dialog" aria-label="Live support chat">
           <header>
             <div>
               <span className="dot" /> Live Support
             </div>
-            <button onClick={() => setIsOpen(false)}>
+            <button type="button" onClick={() => setIsOpen(false)} aria-label="Close chat">
               <X size={16} />
             </button>
           </header>
           <div className="chat-body">
+            {connecting ? <p className="muted small">Connecting…</p> : null}
             {messages.map((message) => (
               <div key={message.id} className={`bubble ${message.from}`}>
                 {message.text}
@@ -129,12 +138,13 @@ function LiveChatWidget() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') sendMessage()
               }}
+              disabled={!isAuthenticated || connecting}
             />
-            <button onClick={sendMessage}>
+            <button type="button" onClick={sendMessage} disabled={!isAuthenticated || connecting}>
               <Send size={16} />
             </button>
           </footer>
-        </motion.div>
+        </div>
       ) : null}
     </>
   )

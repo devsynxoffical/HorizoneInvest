@@ -42,6 +42,8 @@ const env = {
     fromName: process.env.SMTP_FROM_NAME || "Horizoneinvest",
     fromEmail: process.env.SMTP_FROM_EMAIL,
   },
+  // Signup OTP is off by default. Set REQUIRE_SIGNUP_OTP=true in .env to turn it back on.
+  skipSignupOtp: process.env.REQUIRE_SIGNUP_OTP !== "true",
 };
 
 

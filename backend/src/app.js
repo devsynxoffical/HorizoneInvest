@@ -55,11 +55,23 @@ app.use("/api", apiRouter);
 
 const frontendRoot = env.frontendRoot || path.resolve(process.cwd(), "..");
 const frontendIndex = path.join(frontendRoot, "index.html");
+const adminRoot = path.join(frontendRoot, "admin");
+const adminIndex = path.join(adminRoot, "index.html");
 const canServeFrontend = fs.existsSync(frontendIndex);
+const canServeAdmin = fs.existsSync(adminIndex);
+
+if (canServeAdmin) {
+  app.use("/admin", express.static(adminRoot));
+}
 
 if (canServeFrontend) {
   app.use(express.static(frontendRoot));
-  app.get(/^\/(?!api(?:\/|$)).*/, (_req, res) => {
+  if (canServeAdmin) {
+    app.get(/^\/admin(?:\/.*)?$/, (_req, res) => {
+      res.sendFile(adminIndex);
+    });
+  }
+  app.get(/^\/(?!api(?:\/|$)|admin(?:\/|$)).*$/, (_req, res) => {
     res.sendFile(frontendIndex);
   });
 }

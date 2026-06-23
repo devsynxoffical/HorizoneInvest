@@ -186,6 +186,11 @@ export function AdminProvider({ children }) {
     return res?.data || null
   }, [])
 
+  const getUserReferralNetwork = useCallback(async (userId) => {
+    const res = await apiRequest(`/admin/users/${userId}/referrals`)
+    return res?.data || null
+  }, [])
+
   const impersonateUser = useCallback(async (userId) => {
     const res = await apiRequest(`/admin/users/${userId}/impersonate`, { method: 'POST' })
     return res?.data || null
@@ -358,6 +363,7 @@ export function AdminProvider({ children }) {
       deleteDeposit,
       updateWithdrawalStatus,
       getUserOverview,
+      getUserReferralNetwork,
       impersonateUser,
       closeChatRoom,
       getChatMessages,
@@ -398,6 +404,7 @@ export function AdminProvider({ children }) {
       deleteDeposit,
       updateWithdrawalStatus,
       getUserOverview,
+      getUserReferralNetwork,
       impersonateUser,
       closeChatRoom,
       getChatMessages,

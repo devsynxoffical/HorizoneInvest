@@ -17,11 +17,17 @@
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
   background: linear-gradient(140deg, #020617, #0f172a, #042f2e);
+  touch-action: manipulation;
 }
 
 a {

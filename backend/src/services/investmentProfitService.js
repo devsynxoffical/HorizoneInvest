@@ -27,6 +27,8 @@ async function creditPendingDailyProfits(db, userId, trx = null) {
       "investments.start_date as startDate",
       "investments.claimed_earning as claimedEarning",
       "investment_plans.duration_days as durationDays",
+      "investment_plans.daily_return_percent as dailyReturnPercent",
+      "investment_plans.total_return_percent as totalReturnPercent",
       "investment_plans.name as planName",
     )
     .where("investments.status", "active")
@@ -55,8 +57,18 @@ async function creditPendingDailyProfits(db, userId, trx = null) {
   for (const item of investments) {
     const amount = toNumber(item.amount);
     const expectedReturn = toNumber(item.expectedReturn);
-    const totalProfit = Math.max(0, expectedReturn - amount);
     const durationDays = Math.max(1, toNumber(item.durationDays, 1));
+    const dailyPct = toNumber(item.dailyReturnPercent);
+    const totalReturnPct = toNumber(item.totalReturnPercent);
+    // Match advertised daily %: profit = principal × (daily% / 100) × duration (same as daily% × duration = total% when admin keeps them aligned).
+    let totalProfit = 0;
+    if (dailyPct > 0) {
+      totalProfit = Number((amount * (dailyPct / 100) * durationDays).toFixed(4));
+    } else if (totalReturnPct > 0) {
+      totalProfit = Number((amount * (totalReturnPct / 100)).toFixed(4));
+    } else {
+      totalProfit = Math.max(0, Number((expectedReturn - amount).toFixed(4)));
+    }
     const completedDays = getCompletedDays(item.startDate, durationDays);
     if (completedDays <= 0 || totalProfit <= 0) continue;
 
@@ -64,7 +76,10 @@ async function creditPendingDailyProfits(db, userId, trx = null) {
     let paidSum = toNumber(meta.paidSum);
     let insertedCount = 0;
     let insertedAmount = 0;
-    const baseDaily = Number((totalProfit / durationDays).toFixed(4));
+    const baseDaily =
+      dailyPct > 0
+        ? Number((amount * (dailyPct / 100)).toFixed(4))
+        : Number((totalProfit / durationDays).toFixed(4));
 
     for (let dayIndex = 1; dayIndex <= completedDays; dayIndex += 1) {
       if (meta.days.has(dayIndex)) continue;
@@ -152,37 +167,54 @@ async function settleMaturedPrincipalsForAllUsers(db) {
       "investment_plans.name as planName",
     );
   let settledCount = 0;
+  const userIds = [...new Set(matured.map((row) => Number(row.userId)).filter(Boolean))];
+  let firstByUser = new Map();
+  if (userIds.length) {
+    const firstRows = await db("investments")
+      .select("user_id as userId", db.raw("MIN(id) as firstInvestmentId"))
+      .whereIn("user_id", userIds)
+      .groupBy("user_id");
+    firstByUser = new Map(firstRows.map((r) => [Number(r.userId), Number(r.firstInvestmentId)]));
+  }
   for (const item of matured) {
     await db.transaction(async (trx) => {
       const fresh = await trx("investments").where({ id: item.id }).forUpdate().first();
       if (!fresh || fresh.status !== "active") return;
       const principal = Number(fresh.amount || 0);
-      const reference = `INV-AUTO-CLM-${fresh.id}-${Date.now()}`;
-      await adjustWalletBalance(
-        db,
-        {
-          userId: fresh.user_id,
-          delta: principal,
-          reason: "investment_principal_return",
-          reference,
-        },
-        trx,
-      );
-      const wallet = await getOrCreateWallet(db, fresh.user_id, trx);
-      const lockedRow = await trx("wallets").where({ id: wallet.id }).forUpdate().first();
-      await trx("wallets")
-        .where({ id: wallet.id })
-        .update({
-          locked_balance: Number((Number(lockedRow.locked_balance || 0) + principal).toFixed(2)),
-          updated_at: trx.fn.now(),
-        });
+      const firstInvId = firstByUser.get(Number(fresh.user_id));
+      const skipPrincipalReturn = firstInvId === Number(fresh.id);
+
+      if (!skipPrincipalReturn) {
+        const reference = `INV-AUTO-CLM-${fresh.id}-${Date.now()}`;
+        await adjustWalletBalance(
+          db,
+          {
+            userId: fresh.user_id,
+            delta: principal,
+            reason: "investment_principal_return",
+            reference,
+          },
+          trx,
+        );
+        const wallet = await getOrCreateWallet(db, fresh.user_id, trx);
+        const lockedRow = await trx("wallets").where({ id: wallet.id }).forUpdate().first();
+        await trx("wallets")
+          .where({ id: wallet.id })
+          .update({
+            locked_balance: Number((Number(lockedRow.locked_balance || 0) + principal).toFixed(2)),
+            updated_at: trx.fn.now(),
+          });
+      }
+
       await trx("investments")
         .where({ id: fresh.id })
         .update({ status: "completed", end_date: trx.fn.now(), updated_at: trx.fn.now() });
       await trx("notifications").insert({
         user_id: fresh.user_id,
         title: "Investment completed",
-        message: `Principal $${principal.toFixed(2)} from ${item.planName} returned automatically and locked for reinvestment.`,
+        message: skipPrincipalReturn
+          ? `${item.planName} term completed. Initial principal stays in the program and is not returned to your wallet.`
+          : `Principal $${principal.toFixed(2)} from ${item.planName} returned automatically and locked for reinvestment.`,
       });
     });
     settledCount += 1;

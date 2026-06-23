@@ -171,6 +171,19 @@
   color: #a7f3d0;
 }
 
+.whatsapp-splash-cta {
+  margin-top: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.65rem 1rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .splash-social-links {
   display: flex;
   flex-wrap: wrap;
@@ -637,11 +650,12 @@ select:-webkit-autofill {
   padding: 0.7rem;
   border: 1px solid transparent;
   border-radius: 12px;
-  transition: 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  font-size: 1rem;
+  touch-action: manipulation;
 }
 
 .nav-item:hover {
-  transform: translateX(4px);
   background: rgba(255, 255, 255, 0.05);
 }
 
@@ -670,6 +684,13 @@ select:-webkit-autofill {
   display: grid;
   align-content: start;
   gap: 0.9rem;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.page-outlet {
+  min-width: 0;
+  width: 100%;
 }
 
 .topbar {
@@ -785,6 +806,218 @@ select:-webkit-autofill {
   display: flex;
   gap: 0.45rem;
   justify-content: flex-end;
+}
+
+.mobile-record-list {
+  display: none;
+}
+
+.mobile-record-card {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.75rem 0.85rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.mobile-record-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  font-size: 0.92rem;
+}
+
+.mobile-record-row span,
+.mobile-record-row strong {
+  word-break: break-word;
+  text-align: right;
+}
+
+.mobile-page-back {
+  display: none;
+  align-items: center;
+  gap: 0.4rem;
+  width: fit-content;
+  margin-bottom: 0.35rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.mobile-friendly-page {
+  width: 100%;
+  max-width: 100%;
+}
+
+.whatsapp-prompt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(6px);
+  animation: whatsapp-overlay-in 0.25s ease-out;
+}
+
+@keyframes whatsapp-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.whatsapp-prompt-card {
+  width: min(360px, 100%);
+  padding: 1.75rem 1.35rem 1.5rem;
+  position: relative;
+  text-align: center;
+  border-radius: 22px;
+  border: 1.5px solid rgba(168, 85, 247, 0.55);
+  background: linear-gradient(180deg, #12141f 0%, #0a0c14 100%);
+  box-shadow:
+    0 0 0 1px rgba(139, 92, 246, 0.12),
+    0 24px 48px rgba(0, 0, 0, 0.55),
+    0 0 40px rgba(168, 85, 247, 0.15);
+  animation: whatsapp-card-in 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes whatsapp-card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.whatsapp-prompt-close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.whatsapp-prompt-close:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.whatsapp-prompt-logo-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+
+.whatsapp-prompt-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(34, 197, 94, 0.25);
+}
+
+.whatsapp-prompt-title {
+  margin: 0 0 0.65rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+}
+
+.whatsapp-prompt-subtitle {
+  margin: 0 0 1.35rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #94a3b8;
+  max-width: 28ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.whatsapp-prompt-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.9rem 1.25rem;
+  border-radius: 999px;
+  border: none;
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff;
+  background: linear-gradient(180deg, #2dd46a 0%, #22c55e 45%, #16a34a 100%);
+  box-shadow:
+    0 4px 14px rgba(34, 197, 94, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.whatsapp-prompt-cta:hover {
+  filter: brightness(1.06);
+  box-shadow:
+    0 6px 20px rgba(34, 197, 94, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.whatsapp-prompt-cta:active {
+  transform: translateY(0);
+}
+
+.whatsapp-join-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+}
+
+.whatsapp-inline-banner {
+  margin: 0.75rem 0 0.35rem;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.18), rgba(16, 185, 129, 0.1));
+  color: #ecfdf5;
+  text-decoration: none;
+}
+
+.whatsapp-inline-banner span {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.whatsapp-inline-banner small {
+  color: #a7f3d0;
+  font-size: 0.78rem;
 }
 
 .notify-head {
@@ -1109,6 +1342,15 @@ select:-webkit-autofill {
 .metric .icon-box {
   width: 2.2rem;
   height: 2.2rem;
+}
+
+.metric-link {
+  color: inherit;
+  display: block;
+}
+
+.metric-link:hover {
+  text-decoration: none;
 }
 
 .metric-head {
@@ -1696,6 +1938,8 @@ body[data-theme='light'] .invest-dialog-card {
 
 .referral-page {
   padding-bottom: 4.8rem;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 .referral-hero {
@@ -2844,6 +3088,8 @@ code {
   background: linear-gradient(135deg, #10b981, #06b6d4);
   color: #fff;
   box-shadow: 0 12px 22px rgba(6, 182, 212, 0.3);
+  z-index: 110;
+  touch-action: manipulation;
 }
 
 .chat-panel {
@@ -2858,7 +3104,22 @@ code {
   display: grid;
   grid-template-rows: auto 1fr auto;
   color: #fff;
-  z-index: 20;
+  z-index: 120;
+}
+
+.chat-panel-open {
+  animation: chat-panel-in 0.22s ease-out;
+}
+
+@keyframes chat-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .chat-panel header,
@@ -3802,8 +4063,40 @@ body[data-theme='light'] .glass-card {
     -webkit-overflow-scrolling: touch;
   }
 
-  table {
+  .table-wrap--desktop table {
     min-width: 520px;
+  }
+
+  .table-wrap--desktop {
+    display: none;
+  }
+
+  .mobile-record-list {
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  .mobile-filter-stack {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .mobile-filter-stack select,
+  .mobile-filter-stack input {
+    width: 100%;
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .level-row {
+    grid-template-columns: 1fr;
+    justify-items: start;
+    gap: 0.65rem;
+  }
+
+  .mobile-page-back {
+    display: inline-flex;
   }
 
   .deposit-method-card,
@@ -3884,6 +4177,13 @@ body[data-theme='light'] .glass-card {
   .plan-actions {
     width: 100%;
     flex-wrap: wrap;
+  }
+
+  .plan-actions select,
+  .plan-actions input {
+    width: 100%;
+    min-height: 44px;
+    font-size: 16px;
   }
 
   .install-prompt-card {

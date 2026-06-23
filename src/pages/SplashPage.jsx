@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'motion/react'
 import { Sparkles } from 'lucide-react'
+import { FaWhatsapp } from 'react-icons/fa6'
 import { useAppContext } from '../context/AppContext.jsx'
 import { getSupportedSocialLinks } from '../lib/socialPlatforms.js'
 
@@ -10,6 +11,7 @@ function SplashPage() {
   const navigate = useNavigate()
   const { isAuthenticated, socialLinks } = useAppContext()
   const supportedSocialLinks = getSupportedSocialLinks(socialLinks)
+  const whatsappLink = supportedSocialLinks.find((item) => item.platform === 'whatsapp')
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -63,6 +65,11 @@ function SplashPage() {
         >
           <Sparkles size={18} /> Start Investing and Earning Today <Sparkles size={18} />
         </motion.p>
+        {whatsappLink?.url ? (
+          <a className="whatsapp-splash-cta" href={whatsappLink.url} target="_blank" rel="noreferrer">
+            <FaWhatsapp size={18} /> Join WhatsApp Channel
+          </a>
+        ) : null}
         {supportedSocialLinks.length ? (
           <div className="splash-social-links">
             {supportedSocialLinks.map((link) => (

@@ -5,12 +5,14 @@ const path = require("path");
 const multer = require("multer");
 
 const db = require("../../db/knex");
+const env = require("../../config/env");
 const { requireAuth, requireRole } = require("../../middleware/auth");
 const validate = require("../../middleware/validate");
 const asyncHandler = require("../../utils/asyncHandler");
 const ApiError = require("../../utils/ApiError");
 const { adjustWalletBalance, getOrCreateWallet } = require("../../services/walletService");
 const { creditPendingDailyProfits } = require("../../services/investmentProfitService");
+const { getEnrichedReferralNetwork } = require("../../services/referralNetworkService");
 const { signAccessToken } = require("../../utils/tokens");
 
 const router = express.Router();
@@ -412,6 +414,44 @@ router.get(
         transactions,
         commissions,
         dailyProfits,
+      },
+    });
+  }),
+);
+
+router.get(
+  "/users/:id/referrals",
+  asyncHandler(async (req, res) => {
+    const userId = Number(req.params.id);
+    if (!userId) throw new ApiError(400, "Invalid user ID");
+
+    const target = await db("users").where({ id: userId }).first();
+    if (!target) throw new ApiError(404, "User not found");
+
+    const [referralCode, directRow, totalRow, earningsRow, network] = await Promise.all([
+      db("referral_codes").where({ user_id: userId }).first(),
+      db("referral_relations").where({ referrer_id: userId, level: 1 }).count({ count: "*" }).first(),
+      db("referral_relations").where({ referrer_id: userId }).count({ count: "*" }).first(),
+      db("commissions").where({ user_id: userId }).sum({ total: "amount" }).first(),
+      getEnrichedReferralNetwork(db, userId),
+    ]);
+
+    const direct = Number(directRow?.count || 0);
+    const total = Number(totalRow?.count || 0);
+    const code = referralCode?.code || null;
+
+    res.json({
+      success: true,
+      data: {
+        referralCode: code,
+        referralLink: code ? `${env.clientUrl}/signup?ref=${code}` : null,
+        summary: {
+          directReferrals: direct,
+          indirectReferrals: Math.max(0, total - direct),
+          totalReferrals: total,
+          totalCommissionEarnings: Number(earningsRow?.total || 0),
+        },
+        network,
       },
     });
   }),

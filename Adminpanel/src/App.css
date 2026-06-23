@@ -476,6 +476,11 @@ th {
   margin: 0 0 10px;
 }
 
+.error-text {
+  color: #f87171;
+  font-size: 0.9rem;
+}
+
 .dashboard-action-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
