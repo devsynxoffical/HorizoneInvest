@@ -38,9 +38,15 @@ function initializeSocket(server) {
       const [id] = await db("chat_messages").insert({
         room_id: room.id,
         sender_id: socket.user.id,
-        sender_role: socket.user.role,
+        sender_role: socket.user.role === "admin" ? "admin" : "user",
         content,
       });
+      await db("chat_rooms")
+        .where({ id: room.id })
+        .update({
+          updated_at: db.fn.now(),
+          ...(socket.user.role === "admin" ? { admin_last_read_at: db.fn.now() } : {}),
+        });
       const saved = await db("chat_messages")
         .where({ id })
         .select("id", "content", "sender_role as senderRole", "sender_id as senderId", "created_at as createdAt")

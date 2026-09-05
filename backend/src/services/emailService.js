@@ -1,15 +1,31 @@
 const nodemailer = require("nodemailer");
 const env = require("../config/env");
 
-const transporter = nodemailer.createTransport({
-  host: env.smtp.host,
-  port: env.smtp.port,
-  secure: env.smtp.secure,
-  auth: {
-    user: env.smtp.user,
-    pass: env.smtp.pass,
-  },
-});
+let transporter = null;
+
+function isSmtpConfigured() {
+  const { host, user, pass, fromEmail } = env.smtp;
+  return Boolean(host && user && pass && fromEmail);
+}
+
+function getTransporter() {
+  if (!isSmtpConfigured()) return null;
+  if (!transporter) {
+    transporter = nodemailer.createTransport({
+      host: env.smtp.host,
+      port: env.smtp.port,
+      secure: env.smtp.secure,
+      auth: {
+        user: env.smtp.user,
+        pass: env.smtp.pass,
+      },
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 20000,
+    });
+  }
+  return transporter;
+}
 
 const OTP_PURPOSE = {
   signup: "signup",
@@ -62,10 +78,23 @@ async function sendOTPEmail(email, code, purpose = OTP_PURPOSE.signup) {
     html,
   };
 
-  return transporter.sendMail(mailOptions);
+  const mailer = getTransporter();
+  if (!mailer) {
+    throw new Error("SMTP is not configured");
+  }
+  return mailer.sendMail(mailOptions);
+}
+
+async function verifySmtpConnection() {
+  const mailer = getTransporter();
+  if (!mailer) return false;
+  await mailer.verify();
+  return true;
 }
 
 module.exports = {
   sendOTPEmail,
+  verifySmtpConnection,
+  isSmtpConfigured,
   OTP_PURPOSE,
 };

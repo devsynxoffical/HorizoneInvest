@@ -46,10 +46,14 @@ router.get(
   "/me",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const user = await db("users").where({ id: req.user.id }).first();
-    const wallet = await db("wallets").where({ user_id: req.user.id }).first();
-    const settings = await db("settings").where({ user_id: req.user.id }).first();
-    const referralCode = await db("referral_codes").where({ user_id: req.user.id }).first();
+    const [user, wallet, settings, referralCode] = await Promise.all([
+      db("users").where({ id: req.user.id }).first(),
+      db("wallets").where({ user_id: req.user.id }).first(),
+      db("settings").where({ user_id: req.user.id }).first(),
+      db("referral_codes").where({ user_id: req.user.id }).first(),
+    ]);
+
+    if (!user) throw new ApiError(404, "User not found");
 
     res.json({
       success: true,

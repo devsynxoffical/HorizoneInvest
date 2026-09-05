@@ -11,8 +11,8 @@ const validate = require("../../middleware/validate");
 const asyncHandler = require("../../utils/asyncHandler");
 const ApiError = require("../../utils/ApiError");
 const { adjustWalletBalance, getOrCreateWallet } = require("../../services/walletService");
-const { creditPendingDailyProfits } = require("../../services/investmentProfitService");
 const { getEnrichedReferralNetwork } = require("../../services/referralNetworkService");
+const { creditPendingDailyProfitsForUserIds, creditPendingDailyProfitsForAllUsers, settleMaturedPrincipalsForAllUsers, getProfitBacklogSummary } = require("../../services/investmentProfitService");
 const { signAccessToken } = require("../../utils/tokens");
 
 const router = express.Router();
@@ -85,6 +85,7 @@ const createPlanSchema = z.object({
   maxAmount: z.number().positive().nullable().optional(),
   durationDays: z.number().int().positive(),
   dailyReturn: z.number().positive(),
+  payoutDailyReturn: z.number().positive().optional(),
   totalReturn: z.number().positive(),
   features: z.array(z.string().min(1)).default([]),
   imagePath: z.string().max(255).optional(),
@@ -98,6 +99,7 @@ const updatePlanSchema = z.object({
   maxAmount: z.number().positive().nullable().optional(),
   durationDays: z.number().int().positive().optional(),
   dailyReturn: z.number().positive().optional(),
+  payoutDailyReturn: z.number().positive().optional(),
   totalReturn: z.number().positive().optional(),
   features: z.array(z.string().min(1)).optional(),
   imagePath: z.string().max(255).optional(),
@@ -221,6 +223,53 @@ router.get(
   }),
 );
 
+router.post(
+  "/run-profit-sync",
+  asyncHandler(async (req, res) => {
+    const profitResult = await creditPendingDailyProfitsForAllUsers(db);
+    const settleResult = await settleMaturedPrincipalsForAllUsers(db);
+
+    await db("admin_actions").insert({
+      admin_id: req.user.id,
+      action: "run_profit_sync",
+      target_type: "system",
+      target_id: "all_users",
+      meta: JSON.stringify({
+        usersProcessed: profitResult.usersProcessed,
+        failedUsers: profitResult.failedUsers || 0,
+        credited: profitResult.credited,
+        entries: profitResult.entries,
+        matured: settleResult.settledCount || 0,
+      }),
+    });
+
+    res.json({
+      success: true,
+      message:
+        profitResult.needsCredit > 0
+          ? `Profit sync complete. $${Number(profitResult.credited || 0).toFixed(2)} credited across ${profitResult.entries || 0} day(s). ${profitResult.needsCredit} investment(s) were queued. Still behind: ${profitResult.investmentsStillBehind || 0} investment(s) / ${profitResult.usersStillBehind || 0} user(s).`
+          : `All caught up. No pending profit days. Active: ${profitResult.activeInvestments || 0} investment(s), ${profitResult.activeUsers || 0} user(s). Still behind: ${profitResult.investmentsStillBehind || 0}.`,
+      data: {
+        usersProcessed: profitResult.usersProcessed,
+        activeUsers: profitResult.activeUsers || 0,
+        activeInvestments: profitResult.activeInvestments || 0,
+        usersStillBehind: profitResult.usersStillBehind || 0,
+        investmentsStillBehind: profitResult.investmentsStillBehind || 0,
+        failedUsers: profitResult.failedUsers || 0,
+        credited: profitResult.credited,
+        entries: profitResult.entries,
+        skipped: profitResult.skipped || 0,
+        needsCredit: profitResult.needsCredit || 0,
+        errors: profitResult.errors || 0,
+        skipZeroAmount: profitResult.skipZeroAmount || 0,
+        skipZeroProfit: profitResult.skipZeroProfit || 0,
+        skipLoopBlocked: profitResult.skipLoopBlocked || 0,
+        matured: settleResult.settledCount || 0,
+      },
+    });
+  }),
+);
+
 router.get(
   "/users",
   asyncHandler(async (_req, res) => {
@@ -281,8 +330,6 @@ router.get(
   asyncHandler(async (req, res) => {
     const userId = Number(req.params.id);
     if (!userId) throw new ApiError(400, "Invalid user ID");
-
-    await creditPendingDailyProfits(db, userId);
 
     let user;
     try {
@@ -550,6 +597,7 @@ router.get(
         "max_amount as maxAmount",
         "duration_days as durationDays",
         "daily_return_percent as dailyReturn",
+        "payout_daily_return_percent as payoutDailyReturn",
         "total_return_percent as totalReturn",
         "features",
         "image_path as imagePath",
@@ -582,6 +630,7 @@ router.post(
       max_amount: payload.maxAmount ?? null,
       duration_days: payload.durationDays,
       daily_return_percent: payload.dailyReturn,
+      payout_daily_return_percent: payload.payoutDailyReturn ?? 1,
       total_return_percent: payload.totalReturn,
       features: JSON.stringify(payload.features || []),
       image_path: payload.imagePath || null,
@@ -623,6 +672,7 @@ router.patch(
     if (req.body.maxAmount !== undefined) update.max_amount = req.body.maxAmount;
     if (req.body.durationDays !== undefined) update.duration_days = req.body.durationDays;
     if (req.body.dailyReturn !== undefined) update.daily_return_percent = req.body.dailyReturn;
+    if (req.body.payoutDailyReturn !== undefined) update.payout_daily_return_percent = req.body.payoutDailyReturn;
     if (req.body.totalReturn !== undefined) update.total_return_percent = req.body.totalReturn;
     if (req.body.features !== undefined) update.features = JSON.stringify(req.body.features);
     if (req.body.imagePath !== undefined) update.image_path = req.body.imagePath || null;
@@ -630,6 +680,23 @@ router.patch(
     update.updated_at = db.fn.now();
 
     await db("investment_plans").where({ id: planId }).update(update);
+
+    if (req.body.payoutDailyReturn !== undefined) {
+      await db("investments")
+        .where({ plan_id: planId, status: "active" })
+        .update({
+          payout_daily_return_percent: req.body.payoutDailyReturn,
+          updated_at: db.fn.now(),
+        });
+
+      const affectedUserIds = await db("investments")
+        .where({ plan_id: planId, status: "active" })
+        .groupBy("user_id")
+        .pluck("user_id");
+      if (affectedUserIds.length) {
+        await creditPendingDailyProfitsForUserIds(db, affectedUserIds);
+      }
+    }
 
     await db("admin_actions").insert({
       admin_id: req.user.id,

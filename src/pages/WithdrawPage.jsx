@@ -17,7 +17,7 @@ const toAssetUrl = (path) => {
 }
 
 function WithdrawPage() {
-  const { withdraw, user, withdrawals, investments, claimInvestment } = useAppContext()
+  const { withdraw, user, withdrawals, withdrawalCooldown, investments, claimInvestment } = useAppContext()
   const [amount, setAmount] = useState('')
   const [selectedPayoutOptionId, setSelectedPayoutOptionId] = useState('bank-alfalah')
   const [accountNumber, setAccountNumber] = useState('')
@@ -75,6 +75,10 @@ function WithdrawPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault()
+    if (!withdrawalCooldown.canWithdraw) {
+      toast.error('You can request your next withdrawal 24 hours after your last request.')
+      return
+    }
     if (!selectedPayoutAccount?.id) {
       toast.error('Please select a payout account')
       return
@@ -100,6 +104,11 @@ function WithdrawPage() {
   const withdrawableBalance = Math.max(0, Number(user.balance || 0) - lockedDepositBalance)
   const recentWithdrawals = withdrawals
   const totalPotentialProfit = investments.reduce((acc, item) => acc + Number(item.profit || 0), 0)
+  const onWithdrawalCooldown = !withdrawalCooldown.canWithdraw
+  const cooldownEndsAt = withdrawalCooldown.nextAllowedAt
+    ? new Date(withdrawalCooldown.nextAllowedAt).toLocaleString()
+    : ''
+  const cooldownHoursLeft = Math.ceil(Number(withdrawalCooldown.hoursRemaining || 0))
 
   const handleClaim = async (investment) => {
     const response = await claimInvestment(investment.rawId)
@@ -133,6 +142,25 @@ function WithdrawPage() {
         <strong>${lockedDepositBalance.toFixed(2)}</strong>
         <p className="muted small">Deposited funds are frozen for investment use and cannot be withdrawn directly.</p>
       </div>
+
+      {onWithdrawalCooldown ? (
+        <div className="warning-box withdraw-warning-box">
+          <Clock3 size={16} />
+          <div>
+            <strong>Withdrawal cooldown active</strong>
+            <p>
+              You can request your next withdrawal 24 hours after your last request
+              {withdrawalCooldown.lastWithdrawalStatus
+                ? ` (${withdrawalCooldown.lastWithdrawalStatus}).`
+                : '.'}
+            </p>
+            <p>
+              Try again in about {cooldownHoursLeft} hour(s)
+              {cooldownEndsAt ? ` (${cooldownEndsAt}).` : '.'}
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <form className="glass-card form-card withdraw-form-card" onSubmit={handleSubmit}>
         <h3>Withdrawal Details</h3>
@@ -226,8 +254,13 @@ function WithdrawPage() {
           </div>
         ) : null}
 
-        <button className="btn btn-primary" type="submit" disabled={submitting}>
-          {submitting ? 'Submitting...' : 'Request Withdrawal'} <ArrowRight size={16} />
+        <button
+          className="btn btn-primary"
+          type="submit"
+          disabled={submitting || onWithdrawalCooldown}
+        >
+          {submitting ? 'Submitting...' : onWithdrawalCooldown ? 'Withdrawal Cooldown Active' : 'Request Withdrawal'}{' '}
+          <ArrowRight size={16} />
         </button>
       </form>
 
@@ -271,6 +304,7 @@ function WithdrawPage() {
           <p>- Withdrawals are processed Monday to Friday, 9 AM to 5 PM PST.</p>
           <p>- Ensure your account details are correct to avoid delays.</p>
           <p>- Withdrawal fee is 10% on all selected methods.</p>
+          <p>- You can request one withdrawal every 24 hours (approved or rejected requests count).</p>
           <p>- Contact support if you don&apos;t receive funds within the specific time.</p>
           <p>- Note: minimum withdrawal amount is $1.</p>
         </div>

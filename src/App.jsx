@@ -6,13 +6,14 @@ import { useAppContext } from './context/AppContext.jsx'
 import { useTheme } from './context/ThemeContext.jsx'
 import ThemeToggle from './components/ThemeToggle.jsx'
 import WhatsAppJoinPrompt from './components/WhatsAppJoinPrompt.jsx'
+import AppInstallPrompt from './components/AppInstallPrompt.jsx'
+import AppLayout from './layouts/AppLayout.jsx'
+import DashboardPage from './pages/DashboardPage.jsx'
 
-const AppLayout = lazy(() => import('./layouts/AppLayout.jsx'))
 const SplashPage = lazy(() => import('./pages/SplashPage.jsx'))
 const LoginPage = lazy(() => import('./pages/LoginPage.jsx'))
 const SignUpPage = lazy(() => import('./pages/SignUpPage.jsx'))
 const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'))
-const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'))
 const InvestmentPlansPage = lazy(() => import('./pages/InvestmentPlansPage.jsx'))
 const InvestmentsPage = lazy(() => import('./pages/InvestmentsPage.jsx'))
 const DepositPage = lazy(() => import('./pages/DepositPage.jsx'))
@@ -96,6 +97,7 @@ function App() {
         </Routes>
       </Suspense>
       <WhatsAppJoinPrompt />
+      <AppInstallPrompt />
       <Toaster theme={theme} position="top-right" richColors />
     </>
   )

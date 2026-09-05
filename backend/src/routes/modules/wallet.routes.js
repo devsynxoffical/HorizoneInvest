@@ -10,7 +10,7 @@ const validate = require("../../middleware/validate");
 const asyncHandler = require("../../utils/asyncHandler");
 const ApiError = require("../../utils/ApiError");
 const { getOrCreateWallet, adjustWalletBalance } = require("../../services/walletService");
-const { creditPendingDailyProfits } = require("../../services/investmentProfitService");
+const { creditPendingDailyProfits, creditPendingDailyProfitsIfDue } = require("../../services/investmentProfitService");
 
 const router = express.Router();
 const PAYMENT_METHODS = [
@@ -36,13 +36,61 @@ const withdrawalSchema = z.object({
     .object({
       accountTitle: z.string().min(2).optional(),
       accountNumber: z.string().min(2).optional(),
+      walletAddress: z.string().min(2).optional(),
+      selectedPayoutAccountId: z.string().optional(),
+      selectedPayoutAccountName: z.string().optional(),
+      bankName: z.string().optional(),
       note: z.string().max(255).optional(),
     })
+    .passthrough()
     .optional(),
 });
 
 function isCryptoMethod(method) {
   return String(method || "").toLowerCase() === "crypto";
+}
+
+const WITHDRAWAL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+async function getWithdrawalCooldown(db, userId) {
+  const last = await db("withdrawals")
+    .where({ user_id: userId })
+    .orderBy("created_at", "desc")
+    .select("id", "status", "created_at as createdAt")
+    .first();
+
+  if (!last?.createdAt) {
+    return { canWithdraw: true, nextAllowedAt: null, hoursRemaining: 0, lastWithdrawalAt: null };
+  }
+
+  const lastAt = new Date(last.createdAt).getTime();
+  const elapsed = Date.now() - lastAt;
+  if (elapsed >= WITHDRAWAL_COOLDOWN_MS) {
+    return { canWithdraw: true, nextAllowedAt: null, hoursRemaining: 0, lastWithdrawalAt: last.createdAt };
+  }
+
+  const remainingMs = WITHDRAWAL_COOLDOWN_MS - elapsed;
+  const nextAllowedAt = new Date(lastAt + WITHDRAWAL_COOLDOWN_MS).toISOString();
+  const hoursRemaining = Number((remainingMs / (60 * 60 * 1000)).toFixed(2));
+
+  return {
+    canWithdraw: false,
+    nextAllowedAt,
+    hoursRemaining,
+    lastWithdrawalAt: last.createdAt,
+    lastWithdrawalStatus: last.status,
+  };
+}
+
+async function assertWithdrawalCooldown(db, userId) {
+  const cooldown = await getWithdrawalCooldown(db, userId);
+  if (cooldown.canWithdraw) return cooldown;
+
+  const hours = Math.ceil(cooldown.hoursRemaining);
+  throw new ApiError(
+    400,
+    `You can request your next withdrawal 24 hours after your last request. Please try again in about ${hours} hour(s).`,
+  );
 }
 
 const uploadsRoot = path.join(process.cwd(), "uploads");
@@ -69,7 +117,6 @@ router.get(
   "/balance",
   requireAuth,
   asyncHandler(async (req, res) => {
-    await creditPendingDailyProfits(db, req.user.id);
     const wallet = await getOrCreateWallet(db, req.user.id);
     const balance = Number(wallet.balance || 0);
     const lockedBalance = Number(wallet.locked_balance || 0);
@@ -92,7 +139,8 @@ router.get(
     const rows = await db("transactions")
       .where({ user_id: req.user.id })
       .select("id", "type", "amount", "status", "method", "reference", "created_at as createdAt")
-      .orderBy("created_at", "desc");
+      .orderBy("created_at", "desc")
+      .limit(200);
     res.json({ success: true, data: rows });
   }),
 );
@@ -141,7 +189,8 @@ router.post(
   requireAuth,
   validate(withdrawalSchema),
   asyncHandler(async (req, res) => {
-    await creditPendingDailyProfits(db, req.user.id);
+    await creditPendingDailyProfitsIfDue(db, req.user.id, { force: true });
+    await assertWithdrawalCooldown(db, req.user.id);
     const amount = Number(req.body.amount);
     if (amount < 1) throw new ApiError(400, "Minimum withdrawal is $1");
     const fee = Number((amount * 0.1).toFixed(2));
@@ -168,6 +217,8 @@ router.post(
       }
 
       const reference = `WTH-${Date.now()}`;
+      const payoutAccountName = String(accountDetails.selectedPayoutAccountName || accountDetails.bankName || "").trim();
+      const payoutAccountId = String(accountDetails.selectedPayoutAccountId || "").trim();
       await adjustWalletBalance(db, { userId: req.user.id, delta: -totalDebit, reason: "withdrawal", reference }, trx);
       await trx("withdrawals").insert({
         user_id: req.user.id,
@@ -181,6 +232,8 @@ router.post(
           accountTitle: isCryptoMethod(req.body.method) ? undefined : accountTitle,
           accountNumber: isCryptoMethod(req.body.method) ? walletAddress : accountNumber,
           walletAddress: isCryptoMethod(req.body.method) ? walletAddress : undefined,
+          selectedPayoutAccountId: payoutAccountId || undefined,
+          selectedPayoutAccountName: payoutAccountName || undefined,
         }),
       });
       await trx("transactions").insert({
@@ -205,7 +258,7 @@ router.get(
   "/withdrawals",
   requireAuth,
   asyncHandler(async (req, res) => {
-    await creditPendingDailyProfits(db, req.user.id);
+    const cooldown = await getWithdrawalCooldown(db, req.user.id);
     const rows = await db("withdrawals")
       .where({ user_id: req.user.id })
       .select("id", "amount", "fee", "method", "status", "reference", "account_details as accountDetails", "admin_reason as adminReason", "approved_amount as approvedAmount", "refund_amount as refundAmount", "created_at as createdAt")
@@ -216,6 +269,7 @@ router.get(
         ...item,
         accountDetails: item.accountDetails ? JSON.parse(item.accountDetails) : {},
       })),
+      cooldown,
     });
   }),
 );

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ArrowDownCircle,
@@ -7,11 +7,13 @@ import {
   CircleAlert,
   CreditCard,
   MessageSquare,
+  RefreshCw,
   Shield,
   TrendingUp,
   Users,
   Wallet,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAdmin } from '../state/AdminContext.jsx'
 
 function StatCard({ label, value, icon }) {
@@ -28,8 +30,26 @@ function StatCard({ label, value, icon }) {
 }
 
 function DashboardPage() {
-  const { metrics, users, deposits, withdrawals, transactions, chatRooms, plans, paymentAccounts, socialLinks } =
+  const { metrics, users, deposits, withdrawals, transactions, chatRooms, plans, paymentAccounts, socialLinks, runProfitSync } =
     useAdmin()
+  const [profitSyncing, setProfitSyncing] = useState(false)
+
+  const handleRunProfitSync = async () => {
+    if (profitSyncing) return
+    const confirmed = window.confirm(
+      'Run profit sync for ALL active users now? This credits any missing daily profits to wallets.',
+    )
+    if (!confirmed) return
+    setProfitSyncing(true)
+    try {
+      const res = await runProfitSync()
+      toast.success(res?.message || 'Profit sync completed')
+    } catch (error) {
+      toast.error(error.message || 'Profit sync failed')
+    } finally {
+      setProfitSyncing(false)
+    }
+  }
 
   const stats = useMemo(() => {
     const pendingDeposits = deposits.filter((item) => item.status === 'pending').length
@@ -73,6 +93,14 @@ function DashboardPage() {
       <div className="table-card dashboard-actions">
         <h3>Quick Actions</h3>
         <div className="dashboard-action-grid">
+          <button
+            type="button"
+            className="dashboard-action-link dashboard-action-button"
+            onClick={handleRunProfitSync}
+            disabled={profitSyncing}
+          >
+            <RefreshCw size={15} /> {profitSyncing ? 'Running profit sync...' : 'Run Profit Sync (All Users)'}
+          </button>
           <Link to="/users" className="dashboard-action-link">
             <Users size={15} /> Manage Users
           </Link>

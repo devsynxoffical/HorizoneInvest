@@ -5,6 +5,38 @@ import { useAdmin } from '../state/AdminContext.jsx'
 
 const options = ['pending', 'processing', 'completed', 'rejected']
 
+const METHOD_LABELS = {
+  bank_transfer: 'Bank Transfer',
+  easypaisa: 'Easypaisa',
+  jazzcash: 'JazzCash',
+  nayapay: 'NayaPay',
+  sadapay: 'SadaPay',
+  digit_plus: 'Digit Plus',
+  crypto: 'Crypto',
+}
+
+function getWithdrawalAccountInfo(item = {}) {
+  const details = item.accountDetails || {}
+  const method = String(item.method || '').toLowerCase()
+  const isCrypto = method === 'crypto'
+  const bankName =
+    details.selectedPayoutAccountName ||
+    details.bankName ||
+    METHOD_LABELS[method] ||
+    ''
+  const accountHolder = details.accountTitle || '-'
+  const accountNumber = isCrypto
+    ? details.walletAddress || details.accountNumber || '-'
+    : details.accountNumber || details.walletAddress || '-'
+
+  return {
+    bankName: bankName || (isCrypto ? 'Crypto Wallet' : '-'),
+    accountHolder,
+    accountNumber,
+    isCrypto,
+  }
+}
+
 function WithdrawalsPage() {
   const { withdrawals, users, updateWithdrawalStatus, getUserOverview } = useAdmin()
   const navigate = useNavigate()
@@ -105,14 +137,16 @@ function WithdrawalsPage() {
               <th>Method</th>
               <th>Amount</th>
               <th>Fee</th>
-              <th>Account</th>
+              <th>Bank / Account</th>
               <th>Status</th>
               <th>Settlement</th>
               <th>Update</th>
             </tr>
           </thead>
           <tbody>
-            {withdrawals.map((item) => (
+            {withdrawals.map((item) => {
+              const accountInfo = getWithdrawalAccountInfo(item)
+              return (
               <tr key={item.id} className="user-row-clickable" onClick={() => setSelectedWithdrawal(item)}>
                 <td>{item.id}</td>
                 <td>{item.userName || userById.get(Number(item.userId))?.name || `User #${item.userId}`}</td>
@@ -120,8 +154,9 @@ function WithdrawalsPage() {
                 <td>${Number(item.amount).toFixed(2)}</td>
                 <td>${Number(item.fee).toFixed(2)}</td>
                 <td>
-                  <div>{item.accountDetails?.accountTitle || '-'}</div>
-                  <small>{item.accountDetails?.accountNumber || '-'}</small>
+                  <div><strong>{accountInfo.bankName}</strong></div>
+                  <div>{accountInfo.accountHolder}</div>
+                  <small>{accountInfo.accountNumber}</small>
                 </td>
                 <td>{item.status}</td>
                 <td>
@@ -165,12 +200,14 @@ function WithdrawalsPage() {
                   </div>
                 </td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
       </div>
 
-      {selectedWithdrawal ? (
+      {selectedWithdrawal ? (() => {
+        const accountInfo = getWithdrawalAccountInfo(selectedWithdrawal)
+        return (
         <div className="record-modal" onClick={() => setSelectedWithdrawal(null)}>
           <div className="record-modal-card" onClick={(event) => event.stopPropagation()}>
           <div className="user-overview-head">
@@ -216,8 +253,11 @@ function WithdrawalsPage() {
             </div>
             <div className="user-overview-tile">
               <strong>Account & Settlement</strong>
-              <p>Account Holder: {selectedWithdrawal.accountDetails?.accountTitle || '-'}</p>
-              <p>Account Number: {selectedWithdrawal.accountDetails?.accountNumber || '-'}</p>
+              <p>Bank / Wallet: {accountInfo.bankName}</p>
+              <p>Account Holder: {accountInfo.accountHolder}</p>
+              <p>
+                {accountInfo.isCrypto ? 'Wallet Address' : 'Account Number'}: {accountInfo.accountNumber}
+              </p>
               <p>Approved: ${Number(selectedWithdrawal.approvedAmount || 0).toFixed(2)}</p>
               <p>Refund: ${Number(selectedWithdrawal.refundAmount || 0).toFixed(2)}</p>
             </div>
@@ -246,7 +286,8 @@ function WithdrawalsPage() {
           </div>
           </div>
         </div>
-      ) : null}
+        )
+      })() : null}
 
       {statusDialog ? (
         <div className="record-modal" onClick={() => setStatusDialog(null)}>

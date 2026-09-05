@@ -26,6 +26,12 @@ function canAccessRoom(room, user) {
   return Number(room.user_id) === Number(user.id);
 }
 
+async function touchChatRoom(roomId, extra = {}) {
+  await db("chat_rooms")
+    .where({ id: roomId })
+    .update({ updated_at: db.fn.now(), ...extra });
+}
+
 router.post(
   "/room",
   asyncHandler(async (req, res) => {
@@ -84,15 +90,16 @@ router.post(
     if (room.status === "closed" && req.user.role !== "admin") {
       return res.status(400).json({ success: false, message: "Room is closed" });
     }
+    const senderRole = req.user.role === "admin" ? "admin" : "user";
     await db("chat_messages").insert({
       room_id: room.id,
       sender_id: req.user.id,
-      sender_role: req.user.role === "admin" ? "admin" : "user",
+      sender_role: senderRole,
       content: req.body.content,
     });
-    await db("chat_rooms").where({ id: room.id }).update({
+    await touchChatRoom(room.id, {
       admin_id: req.user.role === "admin" ? req.user.id : room.admin_id,
-      updated_at: db.fn.now(),
+      ...(senderRole === "admin" ? { admin_last_read_at: db.fn.now() } : {}),
     });
     res.status(201).json({ success: true, message: "Message sent" });
   }),
@@ -102,10 +109,41 @@ router.get(
   "/admin/rooms",
   requireRole("admin"),
   asyncHandler(async (_req, res) => {
-    const rooms = await db("chat_rooms")
-      .select("id", "room_key as roomKey", "user_id as userId", "admin_id as adminId", "status", "created_at as createdAt")
-      .orderBy("created_at", "desc");
-    res.json({ success: true, data: rooms });
+    const rooms = await db("chat_rooms as cr")
+      .select(
+        "cr.id",
+        "cr.room_key as roomKey",
+        "cr.user_id as userId",
+        "cr.admin_id as adminId",
+        "cr.status",
+        "cr.created_at as createdAt",
+        "cr.updated_at as updatedAt",
+        "cr.admin_last_read_at as adminLastReadAt",
+        db.raw(
+          `(SELECT COUNT(*) FROM chat_messages cm
+            WHERE cm.room_id = cr.id
+              AND cm.sender_role = 'user'
+              AND (cr.admin_last_read_at IS NULL OR cm.created_at > cr.admin_last_read_at)
+          ) as unreadCount`,
+        ),
+        db.raw(`(SELECT MAX(cm.created_at) FROM chat_messages cm WHERE cm.room_id = cr.id) as lastMessageAt`),
+      )
+      .orderByRaw(
+        `(SELECT COUNT(*) FROM chat_messages cm
+          WHERE cm.room_id = cr.id
+            AND cm.sender_role = 'user'
+            AND (cr.admin_last_read_at IS NULL OR cm.created_at > cr.admin_last_read_at)
+        ) DESC, lastMessageAt DESC, cr.updated_at DESC`,
+      );
+
+    res.json({
+      success: true,
+      data: rooms.map((room) => ({
+        ...room,
+        unreadCount: Number(room.unreadCount || 0),
+        lastMessageAt: room.lastMessageAt || room.updatedAt || room.createdAt,
+      })),
+    });
   }),
 );
 
@@ -115,6 +153,18 @@ router.patch(
   asyncHandler(async (req, res) => {
     await db("chat_rooms").where({ id: Number(req.params.id) }).update({ status: "closed", admin_id: req.user.id, updated_at: db.fn.now() });
     res.json({ success: true, message: "Room closed" });
+  }),
+);
+
+router.patch(
+  "/admin/rooms/:id/read",
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const roomId = Number(req.params.id);
+    const room = await db("chat_rooms").where({ id: roomId }).first();
+    if (!room) return res.status(404).json({ success: false, message: "Room not found" });
+    await db("chat_rooms").where({ id: roomId }).update({ admin_last_read_at: db.fn.now(), updated_at: db.fn.now() });
+    res.json({ success: true, message: "Room marked as read" });
   }),
 );
 
@@ -129,6 +179,7 @@ router.get(
       .where({ room_id: room.id })
       .select("id", "sender_id as senderId", "sender_role as senderRole", "content", "created_at as createdAt")
       .orderBy("created_at", "asc");
+    await db("chat_rooms").where({ id: roomId }).update({ admin_last_read_at: db.fn.now() });
     res.json({ success: true, data: messages });
   }),
 );
@@ -147,10 +198,10 @@ router.post(
       sender_role: "admin",
       content: req.body.content,
     });
-    await db("chat_rooms").where({ id: room.id }).update({
+    await touchChatRoom(room.id, {
       admin_id: req.user.id,
       status: "open",
-      updated_at: db.fn.now(),
+      admin_last_read_at: db.fn.now(),
     });
     res.status(201).json({ success: true, message: "Reply sent" });
   }),

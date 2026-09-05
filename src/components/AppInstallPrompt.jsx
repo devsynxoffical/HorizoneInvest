@@ -1,82 +1,94 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Download, Smartphone, X } from 'lucide-react'
+import {
+  APP_INSTALL_REQUEST_EVENT,
+  downloadApk,
+  getApkDownloadUrl,
+  getInstallInstructions,
+  isAppInstalled,
+} from '../lib/appInstall.js'
 
 function AppInstallPrompt() {
-  const [deferredPrompt, setDeferredPrompt] = useState(null)
+  const deferredPromptRef = useRef(null)
   const [isOpen, setIsOpen] = useState(false)
-  const [isInstalled, setIsInstalled] = useState(false)
-  const apkDownloadUrl = import.meta.env.VITE_APK_DOWNLOAD_URL || ''
+  const [isInstalled, setIsInstalled] = useState(isAppInstalled)
+  const [canNativeInstall, setCanNativeInstall] = useState(false)
+  const [showInstructions, setShowInstructions] = useState(false)
+  const apkDownloadUrl = getApkDownloadUrl()
+  const instructions = getInstallInstructions()
 
   const storageKey = 'horizoninvest-install-dismissed-at'
-  const canShow = useMemo(() => !isInstalled && isOpen, [isInstalled, isOpen])
+
+  const runInstall = useCallback(async () => {
+    const prompt = deferredPromptRef.current
+    if (prompt) {
+      try {
+        await prompt.prompt()
+        const choice = await prompt.userChoice
+        if (choice.outcome === 'accepted') {
+          deferredPromptRef.current = null
+          setCanNativeInstall(false)
+          setIsInstalled(true)
+        }
+        setIsOpen(false)
+        return
+      } catch {
+        deferredPromptRef.current = null
+        setCanNativeInstall(false)
+      }
+    }
+
+    downloadApk(apkDownloadUrl)
+    setShowInstructions(true)
+    setIsOpen(true)
+  }, [apkDownloadUrl])
 
   useEffect(() => {
     const dismissedAt = Number(localStorage.getItem(storageKey) || 0)
     const recentlyDismissed = Date.now() - dismissedAt < 12 * 60 * 60 * 1000
-    if (!recentlyDismissed) setIsOpen(true)
+    if (!recentlyDismissed && !isAppInstalled()) setIsOpen(true)
 
     const onBeforeInstall = (event) => {
       event.preventDefault()
-      setDeferredPrompt(event)
+      deferredPromptRef.current = event
+      setCanNativeInstall(true)
       setIsOpen(true)
     }
+
     const onInstalled = () => {
       setIsInstalled(true)
       setIsOpen(false)
-      setDeferredPrompt(null)
+      setShowInstructions(false)
+      deferredPromptRef.current = null
+      setCanNativeInstall(false)
+    }
+
+    const onInstallRequest = () => {
+      runInstall()
     }
 
     window.addEventListener('beforeinstallprompt', onBeforeInstall)
     window.addEventListener('appinstalled', onInstalled)
-
-    const triggerInstall = async () => {
-      if (deferredPrompt) {
-        deferredPrompt.prompt()
-        await deferredPrompt.userChoice
-        setDeferredPrompt(null)
-        setIsOpen(false)
-        return
-      }
-      if (apkDownloadUrl) {
-        window.open(apkDownloadUrl, '_blank', 'noopener,noreferrer')
-        return
-      }
-      setIsOpen(true)
-      alert('On your browser menu, choose "Install app" or "Add to Home screen" to install HorizonInvest.')
-    }
-
-    // Expose global helper so header button can trigger install/download.
-    window.horizoneInstallApp = async () => {
-      await triggerInstall()
-    }
+    window.addEventListener(APP_INSTALL_REQUEST_EVENT, onInstallRequest)
+    window.horizoneInstallApp = runInstall
 
     return () => {
       window.removeEventListener('beforeinstallprompt', onBeforeInstall)
       window.removeEventListener('appinstalled', onInstalled)
-      if (window.horizoneInstallApp) delete window.horizoneInstallApp
+      window.removeEventListener(APP_INSTALL_REQUEST_EVENT, onInstallRequest)
+      if (window.horizoneInstallApp === runInstall) delete window.horizoneInstallApp
     }
-  }, [apkDownloadUrl, deferredPrompt])
+  }, [runInstall])
 
   const closePrompt = () => {
     localStorage.setItem(storageKey, String(Date.now()))
     setIsOpen(false)
+    setShowInstructions(false)
   }
 
-  const handleInstall = async () => {
-    if (deferredPrompt) {
-      deferredPrompt.prompt()
-      await deferredPrompt.userChoice
-      setDeferredPrompt(null)
-      setIsOpen(false)
-      return
-    }
-    if (apkDownloadUrl) {
-      window.open(apkDownloadUrl, '_blank', 'noopener,noreferrer')
-      return
-    }
-  }
+  if (isInstalled || !isOpen) return null
 
-  if (!canShow) return null
+  const actionLabel = canNativeInstall ? 'Install App' : 'Download App'
 
   return (
     <div className="install-prompt-card glass-card">
@@ -88,16 +100,27 @@ function AppInstallPrompt() {
           <Smartphone size={16} />
         </span>
         <div>
-          <strong>Install HorizonInvest App</strong>
-          <p className="muted small">Faster access, full-screen experience, and instant updates.</p>
+          <strong>{showInstructions ? instructions.title : 'Install HorizonInvest App'}</strong>
+          <p className="muted small">
+            {showInstructions
+              ? 'Follow these steps if install did not start automatically.'
+              : 'Faster access, full-screen experience, and instant updates.'}
+          </p>
         </div>
       </div>
+      {showInstructions ? (
+        <ol className="install-instructions-list">
+          {instructions.steps.map((step) => (
+            <li key={step}>{step}</li>
+          ))}
+        </ol>
+      ) : null}
       <div className="install-prompt-actions">
-        <button className="mini-btn" onClick={closePrompt}>
+        <button className="mini-btn" type="button" onClick={closePrompt}>
           Not now
         </button>
-        <button className="primary-btn" onClick={handleInstall}>
-          <Download size={14} /> {deferredPrompt ? 'Install App' : apkDownloadUrl ? 'Download APK' : 'Use browser menu to install'}
+        <button className="primary-btn" type="button" onClick={runInstall}>
+          <Download size={14} /> {actionLabel}
         </button>
       </div>
     </div>

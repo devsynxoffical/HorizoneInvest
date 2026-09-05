@@ -8,7 +8,14 @@ const asyncHandler = require("../../utils/asyncHandler");
 const ApiError = require("../../utils/ApiError");
 const { adjustWalletBalance, getOrCreateWallet } = require("../../services/walletService");
 const { applyCommissions } = require("../../services/referralService");
-const { creditPendingDailyProfits } = require("../../services/investmentProfitService");
+const { creditPendingDailyProfits, creditPendingDailyProfitsIfDue } = require("../../services/investmentProfitService");
+const { resolvePayoutDailyPercent, resolvePlanPayoutDailyPercent } = require("../../utils/investmentPayout");
+const env = require("../../config/env");
+const {
+  getCompletedDays,
+  getMaturityDate,
+  formatProfitLocalYmd,
+} = require("../../utils/profitDays");
 
 const router = express.Router();
 
@@ -16,19 +23,6 @@ const investSchema = z.object({
   planId: z.number().int().positive(),
   amount: z.number().positive(),
 });
-
-function getMaturityDate(startDate, durationDays) {
-  const base = new Date(startDate);
-  base.setDate(base.getDate() + Number(durationDays || 0));
-  return base;
-}
-
-function getCompletedDays(startDate, durationDays) {
-  const safeDuration = Math.max(1, Number(durationDays || 1));
-  const elapsedMs = Math.max(0, Date.now() - new Date(startDate).getTime());
-  const elapsedDays = Math.floor(elapsedMs / (1000 * 60 * 60 * 24));
-  return Math.min(safeDuration, Math.max(0, elapsedDays));
-}
 
 router.get(
   "/plans",
@@ -59,8 +53,7 @@ router.get(
   "/mine",
   requireAuth,
   asyncHandler(async (req, res) => {
-    await creditPendingDailyProfits(db, req.user.id);
-
+    await creditPendingDailyProfitsIfDue(db, req.user.id);
     const rows = await db("investments")
       .join("investment_plans", "investments.plan_id", "investment_plans.id")
       .select(
@@ -71,8 +64,10 @@ router.get(
         "investments.end_date as endDate",
         "investments.expected_return as expectedReturn",
         "investments.claimed_earning as claimedEarning",
+        "investments.payout_daily_return_percent as payoutDailyReturnPercent",
         "investment_plans.duration_days as durationDays",
         "investment_plans.daily_return_percent as dailyReturnPercent",
+        "investment_plans.payout_daily_return_percent as planPayoutDailyReturnPercent",
         "investment_plans.total_return_percent as totalReturnPercent",
         "investment_plans.name as planName",
       )
@@ -86,16 +81,18 @@ router.get(
       .groupBy("investment_id");
     const creditedByInvestment = new Map(profitRows.map((item) => [Number(item.investmentId), Number(item.total || 0)]));
 
-    const now = new Date();
     res.json({
       success: true,
       data: rows.map((item) => {
         const amount = Number(item.amount || 0);
         const durationDays = Math.max(1, Number(item.durationDays || 1));
-        const dailyPct = Number(item.dailyReturnPercent || 0);
+        const displayDailyPct = Number(item.dailyReturnPercent || 0);
+        const payoutDailyPct = resolvePayoutDailyPercent(item);
         const totalReturnPct = Number(item.totalReturnPercent || 0);
         const profitFromDaily =
-          dailyPct > 0 ? Number((amount * (dailyPct / 100) * durationDays).toFixed(4)) : 0;
+          displayDailyPct > 0 ? Number((amount * (displayDailyPct / 100) * durationDays).toFixed(4)) : 0;
+        const payoutProfitFromDaily =
+          payoutDailyPct > 0 ? Number((amount * (payoutDailyPct / 100) * durationDays).toFixed(4)) : 0;
         const profitFromTotal =
           totalReturnPct > 0 ? Number((amount * (totalReturnPct / 100)).toFixed(4)) : 0;
         const storedExpected = Number(item.expectedReturn || 0);
@@ -106,13 +103,18 @@ router.get(
               ? Number((amount + profitFromTotal).toFixed(4))
               : storedExpected;
         const profit = Math.max(0, Number((expectedReturn - amount).toFixed(4)));
+        const payoutProfit =
+          payoutProfitFromDaily > 0
+            ? payoutProfitFromDaily
+            : profitFromTotal > 0
+              ? profitFromTotal
+              : Math.max(0, Number((storedExpected - amount).toFixed(4)));
         const claimedEarning = Number(creditedByInvestment.get(Number(item.id)) || item.claimedEarning || 0);
         const accruedEarning = claimedEarning;
-        const availableEarning = Math.max(0, Number((profit - claimedEarning).toFixed(4)));
+        const availableEarning = Math.max(0, Number((payoutProfit - claimedEarning).toFixed(4)));
         const completedDays = getCompletedDays(item.startDate, item.durationDays);
         const progressPercent = Number(((completedDays / Math.max(1, Number(item.durationDays || 1))) * 100).toFixed(2));
         const maturityDate = getMaturityDate(item.startDate, item.durationDays);
-        const isMatured = now >= maturityDate;
         return {
           ...item,
           amount,
@@ -123,8 +125,8 @@ router.get(
           availableEarning,
           completedDays,
           progressPercent,
-          maturityDate: maturityDate.toISOString().slice(0, 10),
-          canClaim: item.status === "active" && isMatured,
+          maturityDate: formatProfitLocalYmd(maturityDate),
+          canClaim: false,
           canWithdrawEarning: item.status === "active" && availableEarning > 0,
         };
       }),
@@ -145,11 +147,12 @@ router.post(
     await db.transaction(async (trx) => {
       const amount = Number(req.body.amount);
       const durationDays = Math.max(1, Number(plan.duration_days || 1));
-      const dailyPct = Number(plan.daily_return_percent || 0);
+      const displayDailyPct = Number(plan.daily_return_percent || 0);
+      const payoutDailyPct = resolvePlanPayoutDailyPercent(plan);
       const totalPct = Number(plan.total_return_percent || 0);
       const profitAmount =
-        dailyPct > 0
-          ? Number((amount * (dailyPct / 100) * durationDays).toFixed(4))
+        displayDailyPct > 0
+          ? Number((amount * (displayDailyPct / 100) * durationDays).toFixed(4))
           : Number((amount * (totalPct / 100)).toFixed(4));
       const expectedReturn = Number((amount + profitAmount).toFixed(4));
       const reference = `INV-${Date.now()}`;
@@ -176,6 +179,7 @@ router.post(
         status: "active",
         start_date: trx.fn.now(),
         expected_return: expectedReturn,
+        payout_daily_return_percent: payoutDailyPct,
         claimed_earning: 0,
       });
       await trx("transactions").insert({
@@ -230,7 +234,7 @@ router.post(
     const investment = await db("investments").where({ id: investmentId, user_id: req.user.id }).first();
     if (!investment) throw new ApiError(404, "Investment not found");
 
-    const credited = await creditPendingDailyProfits(db, req.user.id);
+    const credited = await creditPendingDailyProfitsIfDue(db, req.user.id, { force: true });
     if (credited.credited <= 0) throw new ApiError(400, "No new daily profit is available yet");
     res.json({
       success: true,
@@ -246,6 +250,13 @@ router.post(
   asyncHandler(async (req, res) => {
     const investmentId = Number(req.params.id);
     if (!investmentId) throw new ApiError(400, "Invalid investment ID");
+
+    if (!env.enablePrincipalRefund) {
+      throw new ApiError(
+        400,
+        "Principal refund is disabled. Your investment stays active for the full plan term and principal is not returned to wallet.",
+      );
+    }
 
     const payout = await db.transaction(async (trx) => {
       await creditPendingDailyProfits(db, req.user.id, trx);
@@ -266,36 +277,32 @@ router.post(
       if (!investment) throw new ApiError(404, "Investment not found");
       if (investment.status !== "active") throw new ApiError(400, "Investment already claimed");
 
-      const maturityDate = getMaturityDate(investment.startDate, investment.durationDays);
-      if (new Date() < maturityDate) {
-        throw new ApiError(400, `Investment matures on ${maturityDate.toISOString().slice(0, 10)}`);
+      const completedDays = getCompletedDays(investment.startDate, investment.durationDays);
+      if (completedDays < Math.max(1, Number(investment.durationDays || 1))) {
+        const maturityDate = formatProfitLocalYmd(getMaturityDate(investment.startDate, investment.durationDays));
+        throw new ApiError(400, `Investment matures on ${maturityDate}`);
       }
 
       const principal = Number(investment.amount || 0);
-      const firstInv = await trx("investments").where({ user_id: req.user.id }).orderBy("id", "asc").first();
-      const skipPrincipalReturn = firstInv && Number(firstInv.id) === Number(investment.id);
-
-      if (!skipPrincipalReturn) {
-        const reference = `INV-CLM-${investment.id}-${Date.now()}`;
-        await adjustWalletBalance(
-          db,
-          {
-            userId: req.user.id,
-            delta: principal,
-            reason: "investment_principal_return",
-            reference,
-          },
-          trx,
-        );
-        const wallet = await getOrCreateWallet(db, req.user.id, trx);
-        const lockedRow = await trx("wallets").where({ id: wallet.id }).forUpdate().first();
-        await trx("wallets")
-          .where({ id: wallet.id })
-          .update({
-            locked_balance: Number((Number(lockedRow.locked_balance || 0) + principal).toFixed(2)),
-            updated_at: trx.fn.now(),
-          });
-      }
+      const reference = `INV-CLM-${investment.id}-${Date.now()}`;
+      await adjustWalletBalance(
+        db,
+        {
+          userId: req.user.id,
+          delta: principal,
+          reason: "investment_principal_return",
+          reference,
+        },
+        trx,
+      );
+      const wallet = await getOrCreateWallet(db, req.user.id, trx);
+      const lockedRow = await trx("wallets").where({ id: wallet.id }).forUpdate().first();
+      await trx("wallets")
+        .where({ id: wallet.id })
+        .update({
+          locked_balance: Number((Number(lockedRow.locked_balance || 0) + principal).toFixed(2)),
+          updated_at: trx.fn.now(),
+        });
 
       await trx("investments")
         .where({ id: investment.id })
@@ -303,19 +310,14 @@ router.post(
       await trx("notifications").insert({
         user_id: req.user.id,
         title: "Investment completed",
-        message: skipPrincipalReturn
-          ? `${investment.planName} term completed. Initial principal stays in the program and is not returned to your wallet.`
-          : `Principal $${principal.toFixed(2)} from ${investment.planName} returned to wallet and remains locked for reinvestment.`,
+        message: `Principal $${principal.toFixed(2)} from ${investment.planName} returned to wallet and remains locked for reinvestment.`,
       });
-      return skipPrincipalReturn ? 0 : principal;
+      return principal;
     });
 
     res.json({
       success: true,
-      message:
-        payout > 0
-          ? "Investment principal credited to wallet"
-          : "Investment closed. Initial principal is not returned to your wallet per platform rules.",
+      message: "Investment principal credited to wallet",
       data: { payout },
     });
   }),

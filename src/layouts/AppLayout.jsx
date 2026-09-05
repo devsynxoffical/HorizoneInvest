@@ -18,9 +18,9 @@ import {
 import { useAppContext } from '../context/AppContext.jsx'
 import LiveChatWidget from '../components/LiveChatWidget.jsx'
 import MobilePageBack from '../components/MobilePageBack.jsx'
-import AppInstallPrompt from '../components/AppInstallPrompt.jsx'
 import ThemeToggle from '../components/ThemeToggle.jsx'
 import { getSupportedSocialLinks } from '../lib/socialPlatforms.js'
+import { requestAppInstall } from '../lib/appInstall.js'
 
 const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -126,10 +126,10 @@ function AppLayout() {
               className="mini-btn install-header-btn"
               type="button"
               onClick={() => {
-                if (window.horizoneInstallApp) {
+                if (typeof window.horizoneInstallApp === 'function') {
                   window.horizoneInstallApp()
                 } else {
-                  alert('On your browser menu, choose "Install app" or "Add to Home screen" to install HorizonInvest.')
+                  requestAppInstall()
                 }
               }}
             >
@@ -189,7 +189,6 @@ function AppLayout() {
           </div>
         </aside>
       ) : null}
-      <AppInstallPrompt />
       <LiveChatWidget isOpen={isChatOpen} onOpenChange={setIsChatOpen} />
       {!isChatOpen ? (
         <button

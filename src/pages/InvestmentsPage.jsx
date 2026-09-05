@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { useAppContext } from '../context/AppContext.jsx'
 
 function InvestmentsPage() {
-  const { investments, claimInvestment, withdrawInvestmentEarning, user } = useAppContext()
+  const { investments, withdrawInvestmentEarning, user } = useAppContext()
   const [selectedId, setSelectedId] = useState(null)
 
   const selected = useMemo(
@@ -174,10 +174,10 @@ function InvestmentsPage() {
                 >
                   Claim Daily Profit to Wallet
                 </button>
-                <button className="mini-btn" type="button" disabled={!selected.canClaim} onClick={() => handleClaim(selected)}>
-                  Claim Principal to Wallet
-                </button>
               </div>
+              <p className="muted small">
+                Principal stays invested for the full plan term and is not refunded to wallet. Daily profits credit automatically.
+              </p>
             </div>
           ) : null}
         </div>

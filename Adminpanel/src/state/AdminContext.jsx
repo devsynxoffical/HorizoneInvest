@@ -318,6 +318,13 @@ export function AdminProvider({ children }) {
     return rows
   }, [])
 
+  const refreshChatRooms = useCallback(async () => {
+    const res = await apiRequest('/chat/admin/rooms')
+    const rows = res?.data || []
+    setChatRooms(rows)
+    return rows
+  }, [])
+
   const adjustUserWallet = useCallback(
     async (userId, payload) => {
       await apiRequest(`/admin/users/${userId}/wallet-adjust`, {
@@ -339,6 +346,12 @@ export function AdminProvider({ children }) {
     },
     [bootstrap],
   )
+
+  const runProfitSync = useCallback(async () => {
+    const res = await apiRequest('/admin/run-profit-sync', { method: 'POST' })
+    await bootstrap()
+    return res
+  }, [bootstrap])
 
   const value = useMemo(
     () => ({
@@ -379,8 +392,10 @@ export function AdminProvider({ children }) {
       deletePaymentAccount,
       uploadMedia,
       refreshUsers,
+      refreshChatRooms,
       adjustUserWallet,
       updateUserDetails,
+      runProfitSync,
     }),
     [
       isAuthenticated,
@@ -420,8 +435,10 @@ export function AdminProvider({ children }) {
       deletePaymentAccount,
       uploadMedia,
       refreshUsers,
+      refreshChatRooms,
       adjustUserWallet,
       updateUserDetails,
+      runProfitSync,
     ],
   )
 

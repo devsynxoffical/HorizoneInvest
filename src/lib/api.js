@@ -62,17 +62,31 @@ async function refreshAccessToken() {
   }
 }
 
-async function request(path, { method = 'GET', body, headers = {}, _retry = false } = {}) {
+async function request(path, { method = 'GET', body, headers = {}, _retry = false, timeoutMs = 20000 } = {}) {
   const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
-  const response = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers: {
-      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-      ...headers,
-    },
-    body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
-  })
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  let response
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers: {
+        ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...headers,
+      },
+      body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Request timed out. Please check your connection and try again.')
+    }
+    throw error
+  } finally {
+    clearTimeout(timeoutId)
+  }
 
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {

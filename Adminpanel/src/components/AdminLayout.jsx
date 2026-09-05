@@ -38,6 +38,7 @@ function AdminLayout() {
     return {
       pendingDeposits: deposits.filter((item) => String(item.status || '').toLowerCase() === 'pending').length,
       pendingWithdrawals: withdrawals.filter((item) => String(item.status || '').toLowerCase() === 'pending').length,
+      unreadChats: chatRooms.filter((item) => Number(item.unreadCount || 0) > 0).length,
       openChats: chatRooms.filter((item) => String(item.status || '').toLowerCase() === 'open').length,
       newUsers: users.filter((item) => now - new Date(item.createdAt || 0).getTime() <= 24 * 60 * 60 * 1000).length,
     }
@@ -47,7 +48,7 @@ function AdminLayout() {
       '/users': sidebarStats.newUsers,
       '/deposits': sidebarStats.pendingDeposits,
       '/withdrawals': sidebarStats.pendingWithdrawals,
-      '/chat-rooms': sidebarStats.openChats,
+      '/chat-rooms': sidebarStats.unreadChats,
     }),
     [sidebarStats],
   )
@@ -68,7 +69,7 @@ function AdminLayout() {
             <span className="admin-chip">New users: {sidebarStats.newUsers}</span>
             <span className="admin-chip">Deposits: {sidebarStats.pendingDeposits}</span>
             <span className="admin-chip">Withdrawals: {sidebarStats.pendingWithdrawals}</span>
-            <span className="admin-chip">Chats: {sidebarStats.openChats}</span>
+            <span className="admin-chip">Chats unread: {sidebarStats.unreadChats}</span>
           </div>
         </div>
         <nav className="admin-nav">

@@ -12,7 +12,7 @@ const ApiError = require("../../utils/ApiError");
 const { signAccessToken, signRefreshToken } = require("../../utils/tokens");
 const { generateReferralCode, generateReferralLinkToken } = require("../../utils/referrals");
 const { getOrCreateWallet, adjustWalletBalance } = require("../../services/walletService");
-const { sendOTPEmail, OTP_PURPOSE } = require("../../services/emailService");
+const { sendOTPEmail, OTP_PURPOSE, isSmtpConfigured } = require("../../services/emailService");
 
 const router = express.Router();
 
@@ -20,20 +20,29 @@ function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
 
+function assertSmtpReadyForOtp(purpose) {
+  if (isSmtpConfigured()) return;
+  if (env.nodeEnv === "development") return;
+  const label = purpose === OTP_PURPOSE.passwordReset ? "password reset" : "email verification";
+  throw new ApiError(
+    503,
+    `${label} email is not configured on the server. Please contact support.`,
+  );
+}
+
 async function deliverOtpEmail(email, otp, purpose) {
-  const { smtp, nodeEnv } = env;
-  if (!smtp.host || !smtp.user || !smtp.fromEmail) {
-    if (nodeEnv === "development") {
-      // eslint-disable-next-line no-console
-      console.warn(`[auth] SMTP not configured — code for ${email}: ${otp} (${purpose})`);
-      return;
-    }
-    throw new ApiError(503, "Email is not configured. Please try again later or contact support.");
+  assertSmtpReadyForOtp(purpose);
+  if (!isSmtpConfigured()) {
+    // eslint-disable-next-line no-console
+    console.warn(`[auth] SMTP not configured — code for ${email}: ${otp} (${purpose})`);
+    return;
   }
   try {
     await sendOTPEmail(email, otp, purpose);
   } catch (err) {
-    const detail = nodeEnv === "development" && err?.message ? ` ${err.message}` : "";
+    // eslint-disable-next-line no-console
+    console.error(`[auth] Failed to send ${purpose} OTP to ${email}:`, err?.message || err);
+    const detail = env.nodeEnv === "development" && err?.message ? ` ${err.message}` : "";
     throw new ApiError(503, `Unable to send email.${detail}`);
   }
 }
@@ -338,6 +347,10 @@ router.post(
   "/forgot-password",
   validate(forgotPasswordSchema),
   asyncHandler(async (req, res) => {
+    if (!env.enableForgotPasswordOtp) {
+      throw new ApiError(503, "Password reset is temporarily unavailable. Please contact support.");
+    }
+
     const email = normalizeEmail(req.body.email);
     const user = await db("users").where({ email }).first();
 
@@ -350,7 +363,7 @@ router.post(
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    await db("otps").where({ email }).del();
+    await db("otps").where({ email }).andWhere("type", "password_reset").del();
     await db("otps").insert({
       user_id: user.id,
       email,

@@ -9,8 +9,9 @@ const emptyForm = {
   slug: '',
   minAmount: 100,
   maxAmount: '',
-  durationDays: 30,
-  dailyReturn: 2,
+  durationDays: 365,
+  dailyReturn: 3.5,
+  payoutDailyReturn: 1,
   totalReturn: 60,
   features: '',
   imagePath: '',
@@ -48,6 +49,7 @@ function PlansPage() {
       maxAmount: plan.maxAmount ?? '',
       durationDays: Number(plan.durationDays),
       dailyReturn: Number(plan.dailyReturn),
+      payoutDailyReturn: Number(plan.payoutDailyReturn ?? plan.dailyReturn),
       totalReturn: Number(plan.totalReturn),
       features: (plan.features || []).join(', '),
       imagePath: plan.imagePath || '',
@@ -83,6 +85,7 @@ function PlansPage() {
         maxAmount: form.maxAmount === '' ? null : Number(form.maxAmount),
         durationDays: Number(form.durationDays),
         dailyReturn: Number(form.dailyReturn),
+        payoutDailyReturn: Number(form.payoutDailyReturn),
         totalReturn: Number(form.totalReturn),
         imagePath: form.imagePath || undefined,
         features: form.features
@@ -115,7 +118,7 @@ function PlansPage() {
     <section className="panel-grid">
       <header className="panel-head">
         <h2>Investment Plans</h2>
-        <p>Create and update plans. Frontend user plans are fetched live from these records.</p>
+        <p>Create and update plans. Display % is shown on the website; payout % is what users actually receive daily. Use 365 days for continuous earning (no monthly principal refund).</p>
       </header>
 
       <form className="table-card plan-form" onSubmit={onSubmit}>
@@ -154,9 +157,18 @@ function PlansPage() {
           />
           <input
             type="number"
-            placeholder="Daily Return %"
+            step="0.01"
+            placeholder="Display Daily Return % (website)"
             value={form.dailyReturn}
             onChange={(e) => setForm((prev) => ({ ...prev, dailyReturn: e.target.value }))}
+            required
+          />
+          <input
+            type="number"
+            step="0.01"
+            placeholder="Actual Payout Daily % (wallet credit)"
+            value={form.payoutDailyReturn}
+            onChange={(e) => setForm((prev) => ({ ...prev, payoutDailyReturn: e.target.value }))}
             required
           />
           <input
@@ -211,7 +223,9 @@ function PlansPage() {
               <th>Slug</th>
               <th>Min</th>
               <th>Max</th>
-              <th>Daily %</th>
+              <th>Days</th>
+              <th>Display %</th>
+              <th>Payout %</th>
               <th>Total %</th>
               <th>Image</th>
               <th>Active</th>
@@ -226,7 +240,9 @@ function PlansPage() {
                 <td>{plan.slug}</td>
                 <td>${Number(plan.minAmount).toFixed(2)}</td>
                 <td>{plan.maxAmount == null ? 'Unlimited' : `$${Number(plan.maxAmount).toFixed(2)}`}</td>
+                <td>{Number(plan.durationDays)}</td>
                 <td>{Number(plan.dailyReturn).toFixed(2)}%</td>
+                <td>{Number(plan.payoutDailyReturn ?? plan.dailyReturn).toFixed(2)}%</td>
                 <td>{Number(plan.totalReturn).toFixed(2)}%</td>
                 <td>{plan.imagePath ? <img src={toAssetUrl(plan.imagePath)} alt={plan.name} width={42} height={28} /> : '-'}</td>
                 <td>{plan.isActive ? 'Yes' : 'No'}</td>

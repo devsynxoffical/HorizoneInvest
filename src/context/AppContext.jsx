@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { clearTokens, getAccessToken, request, setTokens } from '../lib/api.js'
+import { formatDatePk } from '../lib/formatDatePk.js'
 
 const AppContext = createContext(null)
 
@@ -48,8 +49,12 @@ function normalizeTransactions(items = []) {
     amount: Number(txn.amount),
     status: String(txn.status || '').toLowerCase(),
     method: txn.method || '-',
-    date: txn.createdAt ? String(txn.createdAt).slice(0, 10) : '',
+    date: txn.createdAt ? formatDatePk(txn.createdAt) : '',
   }))
+}
+
+function unwrap(result, fallback = { data: null }) {
+  return result.status === 'fulfilled' ? result.value : fallback
 }
 
 export function AppProvider({ children }) {
@@ -71,6 +76,11 @@ export function AppProvider({ children }) {
     { level: 3, ratePercent: 2 },
   ])
   const [withdrawals, setWithdrawals] = useState([])
+  const [withdrawalCooldown, setWithdrawalCooldown] = useState({
+    canWithdraw: true,
+    nextAllowedAt: null,
+    hoursRemaining: 0,
+  })
   const [deposits, setDeposits] = useState([])
   const [paymentAccounts, setPaymentAccounts] = useState([])
   const [notifications, setNotifications] = useState([])
@@ -85,40 +95,52 @@ export function AppProvider({ children }) {
     }
   }, [])
 
+  const loadReferralExtras = useCallback(() => {
+    Promise.allSettled([
+      request('/referrals/tree'),
+      request('/referrals/earnings'),
+      request('/referrals/commission-structure'),
+    ])
+      .then(([treeRes, earningsRes, structureRes]) => {
+        const tree = unwrap(treeRes)
+        const earnings = unwrap(earningsRes)
+        const structure = unwrap(structureRes)
+        setReferralTree(tree.data || [])
+        setReferralEntries(earnings?.data?.entries || [])
+        if (structure?.data) setCommissionStructure(structure.data)
+      })
+      .catch(() => {})
+  }, [])
+
   const refreshCoreData = useCallback(async () => {
     const paymentAccountsRequest = request('/payment-accounts').catch((error) => {
-      // Keep frontend usable if backend endpoint is not deployed yet.
       if (String(error.message || '').includes('Route not found')) return { data: [] }
       throw error
     })
 
-    const [
-      meRes,
-      plansRes,
-      investmentsRes,
-      transactionsRes,
-      referralsOverviewRes,
-      referralsTreeRes,
-      referralsEarningsRes,
-      commissionStructureRes,
-      withdrawalsRes,
-      depositsRes,
-      paymentAccountsRes,
-      notificationsRes,
-    ] = await Promise.all([
+    const results = await Promise.allSettled([
       request('/users/me'),
       request('/investments/plans'),
       request('/investments/mine'),
       request('/wallet/transactions'),
       request('/referrals/overview'),
-      request('/referrals/tree'),
-      request('/referrals/earnings'),
-      request('/referrals/commission-structure'),
       request('/wallet/withdrawals'),
       request('/wallet/deposits'),
       paymentAccountsRequest,
       request('/notifications/mine'),
     ])
+
+    loadReferralExtras()
+
+    const meRes = unwrap(results[0])
+    const plansRes = unwrap(results[1])
+    const investmentsRes = unwrap(results[2])
+    const transactionsRes = unwrap(results[3])
+    const referralsOverviewRes = unwrap(results[4])
+    const withdrawalsRes = unwrap(results[5])
+    const depositsRes = unwrap(results[6])
+    const paymentAccountsRes = unwrap(results[7])
+    const notificationsRes = unwrap(results[8])
 
     const investmentsList = investmentsRes.data || []
     const transactionsList = normalizeTransactions(transactionsRes.data || [])
@@ -132,15 +154,25 @@ export function AppProvider({ children }) {
       0,
     )
 
-    setUser((prev) => ({
-      ...prev,
-      ...meRes.data,
-      balance: Number(meRes.data?.balance || 0),
-      totalDeposits: depositsTotal,
-      totalEarnings: earningsTotal,
-      activeInvestments: investmentsList.filter((item) => item.status === 'active').length,
-      settings: meRes.data?.settings || prev.settings,
-    }))
+    if (meRes?.data) {
+      setUser((prev) => ({
+        ...prev,
+        ...meRes.data,
+        balance: Number(meRes.data?.balance || 0),
+        totalDeposits: depositsTotal,
+        totalEarnings: earningsTotal,
+        activeInvestments: investmentsList.filter((item) => item.status === 'active').length,
+        settings: meRes.data?.settings || prev.settings,
+      }))
+    } else {
+      setUser((prev) => ({
+        ...prev,
+        totalDeposits: depositsTotal,
+        totalEarnings: earningsTotal,
+        activeInvestments: investmentsList.filter((item) => item.status === 'active').length,
+      }))
+    }
+
     setInvestmentPlans(normalizePlans(plansRes.data || []))
     setInvestments(
       investmentsList.map((item) => ({
@@ -158,7 +190,7 @@ export function AppProvider({ children }) {
         availableEarning: Number(item.availableEarning || 0),
         progressPercent: Number(item.progressPercent || 0),
         maturityDate: item.maturityDate || '',
-        canClaim: !!item.canClaim,
+        canClaim: false,
         canWithdrawEarning: !!item.canWithdrawEarning,
       })),
     )
@@ -167,9 +199,6 @@ export function AppProvider({ children }) {
     setDirectReferralCount(Number(referralsOverviewRes?.data?.directReferrals || 0))
     setIndirectReferralCount(Number(referralsOverviewRes?.data?.indirectReferrals || 0))
     setReferralEarnings(Number(referralsOverviewRes?.data?.totalEarnings || 0))
-    setReferralTree(referralsTreeRes.data || [])
-    setReferralEntries(referralsEarningsRes?.data?.entries || [])
-    setCommissionStructure(commissionStructureRes?.data || [])
     setWithdrawals(
       (withdrawalsRes?.data || []).map((item) => ({
         id: item.id,
@@ -183,7 +212,7 @@ export function AppProvider({ children }) {
             digit_plus: 'Digit Plus',
             crypto: 'Crypto',
           }[item.method] || item.method,
-        date: String(item.createdAt || '').slice(0, 10),
+        date: formatDatePk(item.createdAt),
         amount: `-$${Number(item.amount).toFixed(2)}`,
         status: item.status,
         approvedAmount: Number(item.approvedAmount || 0),
@@ -192,20 +221,30 @@ export function AppProvider({ children }) {
         accountDetails: item.accountDetails || {},
       })),
     )
+    setWithdrawalCooldown(
+      withdrawalsRes?.cooldown || {
+        canWithdraw: true,
+        nextAllowedAt: null,
+        hoursRemaining: 0,
+      },
+    )
     setDeposits(depositsRes.data || [])
-    // Public endpoint already returns only active accounts.
     setPaymentAccounts(paymentAccountsRes.data || [])
     setNotifications(notificationsRes.data || [])
-  }, [])
+  }, [loadReferralExtras])
 
   useEffect(() => {
     let active = true
     const bootstrap = async () => {
-      await fetchSocialLinks()
-      if (!getAccessToken()) {
+      const socialLinksPromise = fetchSocialLinks()
+      const token = getAccessToken()
+
+      if (!token) {
+        await socialLinksPromise.catch(() => {})
         if (active) setIsBootstrapping(false)
         return
       }
+
       try {
         const meRes = await request('/users/me')
         if (!active) return
@@ -217,7 +256,7 @@ export function AppProvider({ children }) {
           settings: meRes.data?.settings || prev.settings,
         }))
         setIsBootstrapping(false)
-        // Fetch the remaining dashboard data in background to speed up first paint.
+        socialLinksPromise.catch(() => {})
         refreshCoreData().catch(() => {})
       } catch {
         clearTokens()
@@ -243,7 +282,8 @@ export function AppProvider({ children }) {
       })
       setTokens(response.data.accessToken, response.data.refreshToken)
       setIsAuthenticated(true)
-      await refreshCoreData()
+      setIsBootstrapping(false)
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || 'Login successful.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Login failed.' }
@@ -266,7 +306,8 @@ export function AppProvider({ children }) {
       })
       setTokens(response.data.accessToken, response.data.refreshToken)
       setIsAuthenticated(true)
-      await refreshCoreData()
+      setIsBootstrapping(false)
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || 'Registration successful.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Registration failed.' }
@@ -356,7 +397,7 @@ export function AppProvider({ children }) {
         method: 'POST',
         body: { planId: Number(planId), amount: Number(amount) },
       })
-      await refreshCoreData()
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || 'Investment placed successfully.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Unable to place investment.' }
@@ -372,7 +413,7 @@ export function AppProvider({ children }) {
       if (paymentAccountId) form.append('paymentAccountId', String(paymentAccountId))
       form.append('proof', proofFile)
       const response = await request('/wallet/deposit', { method: 'POST', body: form })
-      await refreshCoreData()
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || 'Deposit request submitted.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Unable to submit deposit.' }
@@ -385,7 +426,7 @@ export function AppProvider({ children }) {
         method: 'POST',
         body: { amount: Number(amount), method, accountDetails },
       })
-      await refreshCoreData()
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || 'Withdrawal request submitted.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Unable to request withdrawal.' }
@@ -395,7 +436,7 @@ export function AppProvider({ children }) {
   const claimInvestment = async (investmentId) => {
     try {
       const response = await request(`/investments/${investmentId}/claim`, { method: 'POST' })
-      await refreshCoreData()
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || 'Investment claimed successfully.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Unable to claim investment.' }
@@ -408,7 +449,7 @@ export function AppProvider({ children }) {
         method: 'POST',
         body: amount ? { amount: Number(amount) } : {},
       })
-      await refreshCoreData()
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || 'Earning withdrawn to wallet.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Unable to withdraw earning.' }
@@ -428,7 +469,7 @@ export function AppProvider({ children }) {
   const updateProfile = async (payload) => {
     try {
       const response = await request('/users/me', { method: 'PATCH', body: payload })
-      await refreshCoreData()
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || 'Profile updated.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Unable to update profile.' }
@@ -453,7 +494,7 @@ export function AppProvider({ children }) {
         method: 'PATCH',
         body: { enabled },
       })
-      await refreshCoreData()
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || '2FA updated.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Unable to update 2FA.' }
@@ -466,7 +507,7 @@ export function AppProvider({ children }) {
         method: 'PATCH',
         body: settings,
       })
-      await refreshCoreData()
+      refreshCoreData().catch(() => {})
       return { ok: true, message: response.message || 'Notification settings updated.' }
     } catch (error) {
       return { ok: false, message: error.message || 'Unable to update notifications.' }
@@ -488,6 +529,7 @@ export function AppProvider({ children }) {
       referralEntries,
       commissionStructure,
       withdrawals,
+      withdrawalCooldown,
       deposits,
       paymentAccounts,
       notifications,
@@ -526,6 +568,7 @@ export function AppProvider({ children }) {
       referralEntries,
       commissionStructure,
       withdrawals,
+      withdrawalCooldown,
       deposits,
       paymentAccounts,
       notifications,
